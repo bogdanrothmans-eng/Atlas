@@ -7,7 +7,16 @@ export type AdminPlace = { id: string; name: string; category: string; address: 
 export type AdminComment = { id: string; place_id: string; place_name: string; author: string; body: string; created_at: string };
 export type Dashboard = { places: AdminPlace[]; comments: AdminComment[] };
 const baseHeaders = () => ({ apikey: key!, "Content-Type": "application/json" });
-async function parse<T>(response: Response): Promise<T> { if (!response.ok) { const body = await response.json().catch(() => ({})); throw new Error(body.message || body.error_description || body.hint || "Не удалось выполнить запрос. Проверьте подключение и повторите попытку."); } return response.status === 204 ? undefined as T : response.json(); }
+async function parse<T>(response: Response): Promise<T> {
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({})) as Record<string, string>;
+    const message = body.error_code === "invalid_credentials"
+      ? "Неверный email или пароль"
+      : body.message || body.msg || body.error_description || body.hint;
+    throw new Error(message || "Не удалось выполнить запрос. Проверьте подключение и повторите попытку.");
+  }
+  return response.status === 204 ? undefined as T : response.json();
+}
 export async function signIn(email: string, password: string) { const data = await parse<{ access_token: string }>(await fetch(`${url}/auth/v1/token?grant_type=password`, { method: "POST", headers: baseHeaders(), body: JSON.stringify({ email, password }) })); sessionStorage.setItem(TOKEN_KEY, data.access_token); return data.access_token; }
 export async function signUp(email: string, password: string) { return parse<{ session: { access_token: string } | null }>(await fetch(`${url}/auth/v1/signup`, { method: "POST", headers: baseHeaders(), body: JSON.stringify({ email, password }) })); }
 export function signOut() { sessionStorage.removeItem(TOKEN_KEY); }
