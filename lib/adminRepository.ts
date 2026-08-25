@@ -19,6 +19,20 @@ async function parse<T>(response: Response): Promise<T> {
 }
 export async function signIn(email: string, password: string) { const data = await parse<{ access_token: string }>(await fetch(`${url}/auth/v1/token?grant_type=password`, { method: "POST", headers: baseHeaders(), body: JSON.stringify({ email, password }) })); sessionStorage.setItem(TOKEN_KEY, data.access_token); return data.access_token; }
 export async function signUp(email: string, password: string) { return parse<{ session: { access_token: string } | null }>(await fetch(`${url}/auth/v1/signup`, { method: "POST", headers: baseHeaders(), body: JSON.stringify({ email, password }) })); }
+export async function requestPasswordReset(email: string, redirectTo: string) {
+  return parse<Record<string, never>>(await fetch(`${url}/auth/v1/recover`, {
+    method: "POST",
+    headers: baseHeaders(),
+    body: JSON.stringify({ email, redirect_to: redirectTo }),
+  }));
+}
+export async function updatePassword(accessToken: string, password: string) {
+  return parse<Record<string, unknown>>(await fetch(`${url}/auth/v1/user`, {
+    method: "PUT",
+    headers: { ...baseHeaders(), Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ password }),
+  }));
+}
 export function signOut() { sessionStorage.removeItem(TOKEN_KEY); }
 export function currentToken() { return typeof window === "undefined" ? null : sessionStorage.getItem(TOKEN_KEY); }
 async function rpc<T>(name: string, body: object = {}) { const token = currentToken(); if (!token) throw new Error("Войдите в аккаунт"); return parse<T>(await fetch(`${url}/rest/v1/rpc/${name}`, { method: "POST", headers: { ...baseHeaders(), Authorization: `Bearer ${token}` }, body: JSON.stringify(body) })); }
