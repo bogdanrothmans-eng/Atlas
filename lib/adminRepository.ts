@@ -1,5 +1,7 @@
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/$/, "");
-const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+import { supabasePublishableKey, supabaseUrl } from "./supabaseConfig";
+
+const url = supabaseUrl;
+const key = supabasePublishableKey;
 const TOKEN_KEY = "atlas-admin-token";
 export type AdminPlace = { id: string; name: string; category: string; address: string; description: string; longitude: number; latitude: number; status: "published" | "hidden"; verified_count: number; created_at: string };
 export type AdminComment = { id: string; place_id: string; place_name: string; author: string; body: string; created_at: string };

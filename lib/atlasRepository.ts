@@ -2,8 +2,10 @@ export type Category = "documents" | "health" | "food" | "work" | "family" | "le
 export type Comment = { id: string; author: string; text: string; date: string };
 export type Place = { id: string; name: string; category: Category; address: string; description: string; lng: number; lat: number; verified: number; comments: Comment[]; addedBy?: string };
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/$/, "");
-const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+import { supabasePublishableKey, supabaseUrl } from "./supabaseConfig";
+
+const url = supabaseUrl;
+const key = supabasePublishableKey;
 export const isSupabaseConfigured = Boolean(url && key);
 
 type DbComment = { id: string; author: string; body: string; created_at: string };
