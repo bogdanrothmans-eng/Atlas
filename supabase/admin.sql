@@ -2,7 +2,7 @@ alter table public.places add column if not exists status text not null default 
 create table if not exists public.admin_users (email text primary key, created_at timestamptz not null default now());
 alter table public.admin_users enable row level security;
 revoke all on public.admin_users from anon, authenticated;
-insert into public.admin_users (email) values ('gogachij@gmail.com') on conflict (email) do nothing;
+insert into public.admin_users (email) values ('mrgold2332@ya.ru') on conflict (email) do nothing;
 
 drop policy if exists "places_are_public" on public.places;
 create policy "places_are_public" on public.places for select to anon, authenticated using (status = 'published');
