@@ -34,7 +34,7 @@ export default function ForgotPasswordPage() {
           <p>Укажите email администратора. Мы отправим ссылку для создания нового пароля.</p>
           <form onSubmit={submit}>
             <label htmlFor="recovery-email">Email</label>
-            <input id="recovery-email" name="email" type="email" autoComplete="email" defaultValue="gogachij@gmail.com" required autoFocus />
+            <input id="recovery-email" name="email" type="email" autoComplete="email" spellCheck={false} placeholder="name@example.com" required autoFocus />
             <button className="primary" type="submit" disabled={loading}>{loading ? "Отправляем…" : "Отправить ссылку"}</button>
           </form>
           <Link className="login-help-link" href="/profile">Вернуться ко входу</Link>
