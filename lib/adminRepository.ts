@@ -20,10 +20,11 @@ async function parse<T>(response: Response): Promise<T> {
 export async function signIn(email: string, password: string) { const data = await parse<{ access_token: string }>(await fetch(`${url}/auth/v1/token?grant_type=password`, { method: "POST", headers: baseHeaders(), body: JSON.stringify({ email, password }) })); sessionStorage.setItem(TOKEN_KEY, data.access_token); return data.access_token; }
 export async function signUp(email: string, password: string) { return parse<{ session: { access_token: string } | null }>(await fetch(`${url}/auth/v1/signup`, { method: "POST", headers: baseHeaders(), body: JSON.stringify({ email, password }) })); }
 export async function requestPasswordReset(email: string, redirectTo: string) {
-  return parse<Record<string, never>>(await fetch(`${url}/auth/v1/recover`, {
+  const recoveryUrl = `${url}/auth/v1/recover?redirect_to=${encodeURIComponent(redirectTo)}`;
+  return parse<Record<string, never>>(await fetch(recoveryUrl, {
     method: "POST",
     headers: baseHeaders(),
-    body: JSON.stringify({ email, redirect_to: redirectTo }),
+    body: JSON.stringify({ email }),
   }));
 }
 export async function updatePassword(accessToken: string, password: string) {
