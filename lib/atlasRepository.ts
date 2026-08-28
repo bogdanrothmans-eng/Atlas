@@ -22,18 +22,75 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+const isMissingRpc = (cause: unknown) => cause instanceof Error && /PGRST202|schema cache|Could not find the function/i.test(cause.message);
+
 export async function loadPlaces(): Promise<Place[]> {
   const rows = await request<DbPlace[]>("places?select=*,comments(*)&order=created_at.asc");
   return rows.map(fromDb);
 }
-export async function createPlace(place: Place): Promise<Place> {
-  const [row] = await request<DbPlace[]>("places?select=*", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ id: place.id, name: place.name, category: place.category, address: place.address, description: place.description, longitude: place.lng, latitude: place.lat, added_by: place.addedBy }) });
-  return { ...fromDb(row), comments: [] };
+export async function createPlace(place: Place, clientId: string): Promise<void> {
+  try {
+    await request<string>("rpc/submit_place", {
+      method: "POST",
+      body: JSON.stringify({
+        new_id: place.id,
+        new_name: place.name,
+        new_category: place.category,
+        new_address: place.address,
+        new_description: place.description,
+        new_longitude: place.lng,
+        new_latitude: place.lat,
+        new_added_by: place.addedBy,
+        client_id: clientId,
+      }),
+    });
+  } catch (cause) {
+    if (!isMissingRpc(cause)) throw cause;
+    await request<void>("places", {
+      method: "POST",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({
+        id: place.id,
+        name: place.name,
+        category: place.category,
+        address: place.address,
+        description: place.description,
+        longitude: place.lng,
+        latitude: place.lat,
+        added_by: place.addedBy,
+        status: "hidden",
+      }),
+    });
+  }
 }
-export async function createComment(placeId: string, comment: Comment): Promise<Comment> {
-  const [row] = await request<DbComment[]>("comments?select=*", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ id: comment.id, place_id: placeId, author: comment.author, body: comment.text }) });
+export async function createComment(placeId: string, comment: Comment, clientId: string): Promise<Comment> {
+  let row: DbComment;
+  try {
+    row = await request<DbComment>("rpc/submit_comment", {
+      method: "POST",
+      body: JSON.stringify({
+        new_id: comment.id,
+        target_place_id: placeId,
+        new_author: comment.author,
+        new_body: comment.text,
+        client_id: clientId,
+      }),
+    });
+  } catch (cause) {
+    if (!isMissingRpc(cause)) throw cause;
+    [row] = await request<DbComment[]>("comments?select=*", {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify({ id: comment.id, place_id: placeId, author: comment.author, body: comment.text }),
+    });
+  }
   return { id: row.id, author: row.author, text: row.body, date: dateLabel(row.created_at) };
 }
-export async function confirmPlace(placeId: string): Promise<number> {
-  return request<number>("rpc/confirm_place", { method: "POST", body: JSON.stringify({ target_place_id: placeId }) });
+export async function confirmPlace(placeId: string, clientId: string): Promise<number> {
+  try {
+    return await request<number>("rpc/confirm_place", { method: "POST", body: JSON.stringify({ target_place_id: placeId, client_id: clientId }) });
+  } catch (cause) {
+    if (!isMissingRpc(cause)) throw cause;
+    return request<number>("rpc/confirm_place", { method: "POST", body: JSON.stringify({ target_place_id: placeId }) });
+  }
 }

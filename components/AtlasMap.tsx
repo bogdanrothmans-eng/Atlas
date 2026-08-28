@@ -15,6 +15,8 @@ import {
 import { Icon, type IconName } from "./Icons";
 import { Modal } from "./Modal";
 
+type MarkerEntry = { marker: Marker; element: HTMLButtonElement; place: Place };
+
 const categories: Record<Category, { label: string; icon: IconName; color: string }> = {
   documents: { label: "Документы", icon: "documents", color: "#6f4bd8" },
   health: { label: "Медицина", icon: "health", color: "#c83f52" },
@@ -48,6 +50,12 @@ const osmStyle: StyleSpecification = {
 };
 
 const STORAGE_KEY = "atlas-demo-phuket-v1";
+const CLIENT_ID_KEY = "atlas-client-id-v1";
+const VERIFIED_STORAGE_KEY = "atlas-confirmed-places-v1";
+const ACTION_TIMES_STORAGE_KEY = "atlas-action-times-v1";
+const MIN_MARKER_DISTANCE = 58;
+const PLACE_SUBMISSION_INTERVAL = 10 * 60 * 1000;
+const COMMENT_SUBMISSION_INTERVAL = 30 * 1000;
 
 const markerSymbols: Record<Category, string> = {
   documents: "▤",
@@ -58,12 +66,76 @@ const markerSymbols: Record<Category, string> = {
   leisure: "✦",
 };
 
+const getClientId = () => {
+  const stored = localStorage.getItem(CLIENT_ID_KEY);
+  if (stored) return stored;
+  const id = crypto.randomUUID();
+  localStorage.setItem(CLIENT_ID_KEY, id);
+  return id;
+};
+
+const getActionWait = (action: "place" | "comment", interval: number) => {
+  try {
+    const stored = JSON.parse(localStorage.getItem(ACTION_TIMES_STORAGE_KEY) || "{}") as Record<string, number>;
+    return Math.max(0, interval - (Date.now() - (stored[action] || 0)));
+  } catch {
+    return 0;
+  }
+};
+
+const rememberAction = (action: "place" | "comment") => {
+  let stored: Record<string, number> = {};
+  try { stored = JSON.parse(localStorage.getItem(ACTION_TIMES_STORAGE_KEY) || "{}"); } catch { /* Replace invalid state. */ }
+  localStorage.setItem(ACTION_TIMES_STORAGE_KEY, JSON.stringify({ ...stored, [action]: Date.now() }));
+};
+
+const spreadOverlappingMarkers = (map: MapLibreMap, entries: MarkerEntry[]) => {
+  const points = entries.map(({ place }) => map.project([place.lng, place.lat]));
+  const offsets = entries.map(() => ({ x: 0, y: 0 }));
+
+  for (let iteration = 0; iteration < 6; iteration += 1) {
+    for (let first = 0; first < entries.length; first += 1) {
+      for (let second = first + 1; second < entries.length; second += 1) {
+        let dx = points[second].x + offsets[second].x - points[first].x - offsets[first].x;
+        let dy = points[second].y + offsets[second].y - points[first].y - offsets[first].y;
+        let distance = Math.hypot(dx, dy);
+
+        if (distance >= MIN_MARKER_DISTANCE) continue;
+        if (distance < 0.01) {
+          const seed = `${entries[first].place.id}:${entries[second].place.id}`
+            .split("")
+            .reduce((total, character) => total + character.charCodeAt(0), 0);
+          const angle = (seed % 360) * Math.PI / 180;
+          dx = Math.cos(angle);
+          dy = Math.sin(angle);
+          distance = 1;
+        }
+
+        const push = (MIN_MARKER_DISTANCE - distance) / 2;
+        const unitX = dx / distance;
+        const unitY = dy / distance;
+        offsets[first].x -= unitX * push;
+        offsets[first].y -= unitY * push;
+        offsets[second].x += unitX * push;
+        offsets[second].y += unitY * push;
+      }
+    }
+  }
+
+  entries.forEach((entry, index) => {
+    const offset = offsets[index];
+    entry.marker.setOffset([Math.round(offset.x), Math.round(offset.y)]);
+    entry.element.classList.toggle("is-displaced", Math.hypot(offset.x, offset.y) > 2);
+  });
+};
+
 export default function AtlasMap() {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
-  const markersRef = useRef<Marker[]>([]);
+  const markersRef = useRef<Map<string, MarkerEntry>>(new Map());
   const addingRef = useRef(false);
   const addButtonRef = useRef<HTMLButtonElement>(null);
+  const hasFitInitialPlacesRef = useRef(false);
 
   const [places, setPlaces] = useState<Place[]>(seedPlaces);
   const [selected, setSelected] = useState<Place | null>(null);
@@ -94,6 +166,15 @@ export default function AtlasMap() {
         try { setPlaces(JSON.parse(raw)); } catch { /* Keep the built-in collection. */ }
       }
       setLoadingPlaces(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(VERIFIED_STORAGE_KEY) || "[]");
+      if (Array.isArray(stored)) setVerifiedIds(new Set(stored.filter((id): id is string => typeof id === "string")));
+    } catch {
+      localStorage.removeItem(VERIFIED_STORAGE_KEY);
     }
   }, []);
 
@@ -157,27 +238,84 @@ export default function AtlasMap() {
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    markersRef.current.forEach((marker) => marker.remove());
-    markersRef.current = visible.map((place) => {
+
+    markersRef.current.forEach(({ marker }) => marker.remove());
+    const entries = new Map<string, MarkerEntry>();
+
+    visible.forEach((place) => {
       const category = categories[place.category];
+      const anchor = document.createElement("div");
+      anchor.className = "place-marker-anchor";
       const element = document.createElement("button");
-      element.className = `place-marker${selected?.id === place.id ? " is-selected" : ""}`;
+      element.className = "place-marker";
       element.type = "button";
       element.title = place.name;
       element.setAttribute("aria-label", `${category.label}: ${place.name}`);
-      element.setAttribute("aria-pressed", selected?.id === place.id ? "true" : "false");
+      element.setAttribute("aria-pressed", "false");
       element.style.setProperty("--marker", category.color);
-      element.textContent = markerSymbols[place.category];
+      const symbol = document.createElement("span");
+      symbol.className = "place-marker-symbol";
+      symbol.setAttribute("aria-hidden", "true");
+      symbol.textContent = markerSymbols[place.category];
+      element.appendChild(symbol);
+      anchor.appendChild(element);
       element.addEventListener("click", (event) => {
         event.stopPropagation();
         setSelected(place);
-        map.flyTo({ center: [place.lng, place.lat], zoom: Math.max(map.getZoom(), 14), essential: false });
       });
-      return new maplibregl.Marker({ element, anchor: "bottom" })
+      const marker = new maplibregl.Marker({ element: anchor, anchor: "bottom" })
         .setLngLat([place.lng, place.lat])
         .addTo(map);
+      entries.set(place.id, { marker, element, place });
     });
-  }, [visible, selected?.id]);
+
+    markersRef.current = entries;
+    const updateLayout = () => spreadOverlappingMarkers(map, Array.from(entries.values()));
+    updateLayout();
+    map.on("zoom", updateLayout);
+    map.on("resize", updateLayout);
+
+    return () => {
+      map.off("zoom", updateLayout);
+      map.off("resize", updateLayout);
+      entries.forEach(({ marker }) => marker.remove());
+      if (markersRef.current === entries) markersRef.current = new Map();
+    };
+  }, [visible]);
+
+  useEffect(() => {
+    markersRef.current.forEach(({ element, place }) => {
+      const isSelected = selected?.id === place.id;
+      element.classList.toggle("is-selected", isSelected);
+      element.setAttribute("aria-pressed", String(isSelected));
+    });
+  }, [selected?.id]);
+
+  const fitPlacesInView = (targets: Place[], animated = false) => {
+    const map = mapRef.current;
+    if (!map || !targets.length) return;
+    const bounds = new maplibregl.LngLatBounds();
+    targets.forEach((place) => bounds.extend([place.lng, place.lat]));
+    const compact = window.innerWidth <= 700;
+    map.fitBounds(bounds, {
+      padding: compact
+        ? { top: 312, right: 24, bottom: 40, left: 24 }
+        : { top: 230, right: 40, bottom: 40, left: 380 },
+      maxZoom: 12.5,
+      duration: animated ? 420 : 0,
+      essential: false,
+    });
+  };
+
+  useEffect(() => {
+    if (loadingPlaces || hasFitInitialPlacesRef.current || !places.length) return;
+    hasFitInitialPlacesRef.current = true;
+    const frame = requestAnimationFrame(() => {
+      mapRef.current?.resize();
+      fitPlacesInView(places);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [loadingPlaces, places]);
 
   const beginAdding = () => {
     setAdding(true);
@@ -202,13 +340,19 @@ export default function AtlasMap() {
     setQuery("");
     setFilter("all");
     setSelected(null);
-    mapRef.current?.flyTo({ center: [98.365, 7.86], zoom: 10.7, essential: false });
+    fitPlacesInView(places, true);
   };
 
   const addPlace = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!draft || savingPlace) return;
     const data = new FormData(event.currentTarget);
+    if (String(data.get("website") || "").trim()) return;
+    const placeWait = getActionWait("place", PLACE_SUBMISSION_INTERVAL);
+    if (isSupabaseConfigured && placeWait > 0) {
+      setNotice(`Новое место можно отправить через ${Math.ceil(placeWait / 60000)} мин.`);
+      return;
+    }
     let place: Place = {
       id: crypto.randomUUID(),
       name: String(data.get("name")).trim(),
@@ -222,11 +366,15 @@ export default function AtlasMap() {
     };
     setSavingPlace(true);
     try {
-      if (isSupabaseConfigured) place = await createPlace(place);
-      setPlaces((current) => [...current, place]);
+      if (isSupabaseConfigured) {
+        await createPlace(place, getClientId());
+        rememberAction("place");
+      } else {
+        setPlaces((current) => [...current, place]);
+        setSelected(place);
+      }
       setDraft(null);
-      setSelected(place);
-      setNotice(isSupabaseConfigured ? "Место добавлено на общую карту" : "Место сохранено в этом браузере");
+      setNotice(isSupabaseConfigured ? "Место отправлено на модерацию" : "Место сохранено в этом браузере");
     } catch {
       setNotice("Не удалось добавить место. Проверьте соединение и повторите попытку.");
     } finally {
@@ -237,12 +385,22 @@ export default function AtlasMap() {
   const addComment = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!selected || savingComment) return;
-    const text = String(new FormData(event.currentTarget).get("comment")).trim();
+    const data = new FormData(event.currentTarget);
+    if (String(data.get("website") || "").trim()) return;
+    const commentWait = getActionWait("comment", COMMENT_SUBMISSION_INTERVAL);
+    if (isSupabaseConfigured && commentWait > 0) {
+      setNotice(`Следующий комментарий можно отправить через ${Math.ceil(commentWait / 1000)} сек.`);
+      return;
+    }
+    const text = String(data.get("comment")).trim();
     if (!text) return;
     let comment: Comment = { id: crypto.randomUUID(), author: "Гость", text, date: "сегодня" };
     setSavingComment(true);
     try {
-      if (isSupabaseConfigured) comment = await createComment(selected.id, comment);
+      if (isSupabaseConfigured) {
+        comment = await createComment(selected.id, comment, getClientId());
+        rememberAction("comment");
+      }
       const updated = { ...selected, comments: [...selected.comments, comment] };
       setPlaces((current) => current.map((place) => place.id === updated.id ? updated : place));
       setSelected(updated);
@@ -259,11 +417,15 @@ export default function AtlasMap() {
     if (!selected || verifying || verifiedIds.has(selected.id)) return;
     setVerifying(true);
     try {
-      const count = isSupabaseConfigured ? await confirmPlace(selected.id) : selected.verified + 1;
+      const count = isSupabaseConfigured ? await confirmPlace(selected.id, getClientId()) : selected.verified + 1;
       const updated = { ...selected, verified: count };
       setPlaces((current) => current.map((place) => place.id === updated.id ? updated : place));
       setSelected(updated);
-      setVerifiedIds((current) => new Set(current).add(updated.id));
+      setVerifiedIds((current) => {
+        const next = new Set(current).add(updated.id);
+        localStorage.setItem(VERIFIED_STORAGE_KEY, JSON.stringify(Array.from(next)));
+        return next;
+      });
       setNotice("Спасибо — актуальность подтверждена");
     } catch {
       setNotice("Не удалось подтвердить актуальность. Повторите попытку.");
@@ -339,7 +501,7 @@ export default function AtlasMap() {
         </nav>
       </div>
 
-      <main id="map" ref={containerRef} className="map" aria-label="Интерактивная карта Пхукета" aria-busy={loadingPlaces} />
+      <main id="map" ref={containerRef} className="map" aria-label="Интерактивная карта Пхукета" aria-busy={loadingPlaces} tabIndex={-1} />
 
       {!selected && !adding && visible.length > 0 && (
         <section className="map-intro" aria-labelledby="map-intro-title">
@@ -433,6 +595,7 @@ export default function AtlasMap() {
                 </div>
               )}
               <form onSubmit={addComment}>
+                <input className="honeypot" name="website" type="text" tabIndex={-1} autoComplete="off" aria-hidden="true" />
                 <label htmlFor="comment">Ваш комментарий</label>
                 <textarea id="comment" name="comment" maxLength={1000} required placeholder="Например: когда лучше приехать и что взять с собой" />
                 <button className="primary" type="submit" disabled={savingComment}>
@@ -453,13 +616,14 @@ export default function AtlasMap() {
             <div className="modal-icon" aria-hidden="true"><Icon name="location" /></div>
             <p className="eyebrow">Новая точка</p>
             <h2 id="add-title">Добавить место</h2>
-            <p className="modal-description">Расскажите, чем оно полезно. После публикации место увидят другие участники Atlas.</p>
+            <p className="modal-description">Расскажите, чем оно полезно. После проверки место появится на общей карте.</p>
             <p className="coordinates"><Icon name="location" /> {draft.lat.toFixed(5)}, {draft.lng.toFixed(5)}</p>
             <form onSubmit={addPlace}>
+              <input className="honeypot" name="website" type="text" tabIndex={-1} autoComplete="off" aria-hidden="true" />
               <label htmlFor="place-name">Название</label>
               <input id="place-name" name="name" maxLength={120} required autoFocus data-initial-focus placeholder="Например: Phuket Immigration Office" />
               <label htmlFor="place-category">Категория</label>
-              <select id="place-category" name="category">
+              <select id="place-category" name="category" defaultValue={filter === "all" ? "documents" : filter}>
                 {(Object.keys(categories) as Category[]).map((key) => <option key={key} value={key}>{categories[key].label}</option>)}
               </select>
               <label htmlFor="place-address">Адрес</label>

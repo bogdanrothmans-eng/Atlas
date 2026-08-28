@@ -246,24 +246,88 @@ svg { display: block; width: 1.15em; height: 1.15em; flex: none; }
 .chip-count { color: var(--color-muted); font-size: 0.75rem; }
 .filters button[aria-pressed="true"] .chip-count { color: inherit; }
 
+.place-marker-anchor {
+  width: 3rem;
+  height: 3.5rem;
+  pointer-events: none;
+}
+
 .place-marker {
+  position: relative;
+  isolation: isolate;
   display: grid;
-  place-items: center;
+  place-items: start center;
+  width: 100%;
+  height: 100%;
+  padding: 0.78rem 0 0;
+  border: 0;
+  border-radius: 1.5rem;
+  color: #ffffff;
+  background: transparent;
+  font-size: 1rem;
+  font-weight: 900;
+  line-height: 1;
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+
+.place-marker::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset-block-start: 0;
+  inset-inline-start: 0.125rem;
   width: 2.75rem;
   height: 2.75rem;
   border: 3px solid #ffffff;
-  border-radius: 50% 50% 50% 12%;
-  transform: rotate(-45deg);
-  color: #ffffff;
+  border-radius: 50%;
   background: var(--marker);
   box-shadow: 0 0 0 1px rgb(10 28 18 / 12%), 0 5px 16px rgb(10 28 18 / 30%);
-  font-size: 1rem;
-  font-weight: 900;
 }
 
-.place-marker:hover { scale: 1.08; }
-.place-marker.is-selected { scale: 1.16; box-shadow: 0 0 0 4px rgb(255 255 255 / 70%), 0 8px 22px rgb(10 28 18 / 34%); }
+.place-marker::after {
+  content: "";
+  position: absolute;
+  z-index: -2;
+  inset-block-start: 2.25rem;
+  inset-inline-start: 1.125rem;
+  width: 0.75rem;
+  height: 0.75rem;
+  rotate: 45deg;
+  border-radius: 0 0 0.2rem;
+  background: var(--marker);
+  box-shadow: 2px 2px 3px rgb(10 28 18 / 18%);
+}
+
+.place-marker-symbol { position: relative; z-index: 1; }
+.place-marker:hover::before { box-shadow: 0 0 0 2px rgb(255 255 255 / 78%), 0 8px 20px rgb(10 28 18 / 36%); }
+.place-marker.is-selected::before { box-shadow: 0 0 0 4px rgb(255 255 255 / 82%), 0 8px 22px rgb(10 28 18 / 38%); }
 .is-adding .map { cursor: crosshair; }
+
+.honeypot { display: none !important; }
+
+.not-found-shell {
+  min-height: 100svh;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: radial-gradient(circle at 50% 0%, #f8fbf9 0, #e8f0eb 48%, #dce7e0 100%);
+}
+
+.not-found-card {
+  width: min(32rem, 100%);
+  padding: clamp(1.5rem, 5vw, 3rem);
+  border-radius: var(--radius-xl);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+  text-align: center;
+}
+
+.not-found-card .brand { justify-content: center; margin-bottom: 2rem; }
+.not-found-code { margin: 0 0 0.5rem; color: var(--color-primary); font-size: 0.8rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+.not-found-card h1 { margin: 0; font-size: clamp(1.8rem, 7vw, 2.7rem); line-height: 1.08; letter-spacing: -0.035em; text-wrap: balance; }
+.not-found-card > p:not(.not-found-code) { max-width: 28rem; margin: 1rem auto 1.5rem; color: var(--color-muted); line-height: 1.6; text-wrap: pretty; }
+.not-found-card .primary { width: 100%; text-decoration: none; }
 
 .map-intro,
 .map-empty,
@@ -649,17 +713,17 @@ td small { margin-top: 0.25rem; color: var(--color-muted); line-height: 1.4; }
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  button, a, .place-marker, .toast {
+  button, a, .toast {
     transition-property: scale, color, background-color, border-color, box-shadow, opacity, transform, visibility;
     transition-duration: 140ms;
     transition-timing-function: ease-out;
   }
-  button:active:not(:disabled), a:active { scale: 0.96; }
+  .place-marker::before { transition: box-shadow 120ms ease-out; }
+  button:active:not(:disabled):not(.place-marker), a:active { scale: 0.96; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
-  .place-marker:hover, .place-marker.is-selected { scale: 1; }
 }
 
 @media (prefers-contrast: more) {
