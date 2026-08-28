@@ -1,17 +1,23 @@
 import Head from "next/head";
+import Image from "next/image";
 import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   currentToken,
+  adminPhotoUrl,
   loadAdminDashboard,
   removeComment,
+  resolveReport,
+  setPhotoStatus,
   setPlaceStatus,
   signIn,
   signOut,
   updateComment,
   updatePlace,
   type AdminComment,
+  type AdminPhoto,
   type AdminPlace,
+  type AdminReport,
   type Dashboard,
 } from "../lib/adminRepository";
 import { Icon } from "../components/Icons";
@@ -30,6 +36,15 @@ const categoryLabels: Record<string, string> = {
   work: "Работа",
   family: "Для семьи",
   leisure: "Досуг",
+};
+
+const reportLabels: Record<AdminReport["reason"], string> = {
+  inaccurate: "Неверная информация",
+  closed: "Место закрыто",
+  spam: "Спам или реклама",
+  harmful: "Опасный контент",
+  duplicate: "Дубликат",
+  other: "Другое",
 };
 
 export default function AdminPage() {
@@ -84,6 +99,30 @@ export default function AdminPage() {
       await refresh();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Не удалось изменить видимость места. Повторите попытку.");
+      setLoading(false);
+    }
+  };
+
+  const moderateReport = async (item: AdminReport, status: "reviewed" | "resolved" | "dismissed", hidePlace = false) => {
+    setLoading(true);
+    setError("");
+    try {
+      await resolveReport(item.id, status, hidePlace);
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Не удалось обработать жалобу");
+      setLoading(false);
+    }
+  };
+
+  const moderatePhoto = async (item: AdminPhoto, status: "published" | "hidden") => {
+    setLoading(true);
+    setError("");
+    try {
+      await setPhotoStatus(item.id, status);
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Не удалось обработать фото");
       setLoading(false);
     }
   };
@@ -170,7 +209,7 @@ export default function AdminPage() {
               <div className="login-icon" aria-hidden="true"><Icon name="user" /></div>
               <p className="eyebrow">Закрытый раздел</p>
               <h1 id="login-title">Вход администратора</h1>
-              <p>Войдите в аккаунт с доступом к модерации мест и комментариев.</p>
+              <p>Войдите в аккаунт с доступом к модерации мест, жалоб, фото и комментариев.</p>
               <form onSubmit={login} aria-describedby={error ? "login-error" : undefined}>
                 <label htmlFor="admin-email">Email</label>
                 <input id="admin-email" name="email" type="email" autoComplete="username" spellCheck={false} required autoFocus />
@@ -192,7 +231,7 @@ export default function AdminPage() {
         ) : (
           <main className="admin-main">
             <div className="admin-title">
-              <div><p className="eyebrow">Панель администратора</p><h1>Управление Atlas</h1><p>Проверяйте места и поддерживайте комментарии в порядке.</p></div>
+              <div><p className="eyebrow">Панель администратора</p><h1>Управление Atlas</h1><p>Проверяйте места, жалобы, фото и обсуждения сообщества.</p></div>
               <button type="button" onClick={refresh} disabled={loading}>{loading ? "Обновляем…" : "Обновить данные"}</button>
             </div>
             {error && <p className="form-error" role="alert">{error}</p>}
@@ -202,6 +241,50 @@ export default function AdminPage() {
               <article><span>Опубликовано</span><strong>{dashboard.places.filter((place) => place.status === "published").length}</strong></article>
               <article><span>Скрыто</span><strong>{dashboard.places.filter((place) => place.status === "hidden").length}</strong></article>
               <article><span>Комментариев</span><strong>{dashboard.comments.length}</strong></article>
+              <article className={dashboard.reports.some((report) => report.status === "new") ? "attention" : ""}><span>Новых жалоб</span><strong>{dashboard.reports.filter((report) => report.status === "new").length}</strong></article>
+            </section>
+
+            <section className="admin-section reports-section">
+              <div className="section-heading"><div><p className="eyebrow">Модерация</p><h2>Жалобы пользователей</h2><p>Проверьте причину, закройте обращение или скройте нарушающую правила точку.</p></div><span className="queue-count">{dashboard.reports.filter((report) => report.status === "new").length} новых</span></div>
+              {dashboard.reports.length ? (
+                <div className="moderation-list">
+                  {dashboard.reports.map((report) => (
+                    <article key={report.id} className={report.status === "new" ? "is-new" : ""}>
+                      <div className="moderation-icon"><Icon name="flag" /></div>
+                      <div className="moderation-copy">
+                        <div className="moderation-meta"><span className={`status report-${report.status}`}>{report.status === "new" ? "Новая" : report.status === "dismissed" ? "Отклонена" : report.status === "resolved" ? "Решена" : "На проверке"}</span><time>{new Date(report.created_at).toLocaleDateString("ru")}</time></div>
+                        <h3>{report.place_name}</h3>
+                        <strong>{reportLabels[report.reason]}</strong>
+                        {report.details && <p>{report.details}</p>}
+                      </div>
+                      <div className="moderation-actions">
+                        {report.status === "new" && <button type="button" disabled={loading} onClick={() => moderateReport(report, "reviewed")}>Взять в работу</button>}
+                        <button type="button" disabled={loading} onClick={() => moderateReport(report, "dismissed")}>Отклонить</button>
+                        <button className="danger-action" type="button" disabled={loading} onClick={() => moderateReport(report, "resolved", true)}>Скрыть место</button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : <div className="admin-empty"><Icon name="check" aria-hidden="true" /><strong>Новых жалоб нет</strong><p>Очередь модерации пуста.</p></div>}
+            </section>
+
+            <section className="admin-section">
+              <div className="section-heading"><div><p className="eyebrow">Фото сообщества</p><h2>Фотографии</h2><p>Публикуйте только полезные и подходящие снимки мест.</p></div><span className="queue-count">{dashboard.photos.filter((photo) => photo.status === "hidden").length} на проверке</span></div>
+              {dashboard.photos.length ? (
+                <div className="photo-moderation-grid">
+                  {dashboard.photos.map((photo) => (
+                    <article key={photo.id}>
+                      <div className="admin-photo"><Image src={adminPhotoUrl(photo)} alt={photo.alt_text || photo.caption || `Фото ${photo.place_name}`} fill sizes="(max-width: 40rem) 100vw, 19rem" /></div>
+                      <div className="photo-moderation-copy">
+                        <div><span className={`status ${photo.status}`}>{photo.status === "published" ? "Опубликовано" : "На проверке"}</span><time>{new Date(photo.created_at).toLocaleDateString("ru")}</time></div>
+                        <h3>{photo.place_name}</h3>
+                        {photo.caption && <p>{photo.caption}</p>}
+                        <div className="row-actions"><button type="button" disabled={loading || photo.status === "published"} onClick={() => moderatePhoto(photo, "published")}>Опубликовать</button><button className="visibility-action" type="button" disabled={loading || photo.status === "hidden"} onClick={() => moderatePhoto(photo, "hidden")}>Скрыть</button></div>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : <div className="admin-empty"><Icon name="camera" aria-hidden="true" /><strong>Фото пока нет</strong><p>Загруженные пользователями фотографии появятся здесь.</p></div>}
             </section>
 
             <section className="admin-section">
@@ -218,14 +301,15 @@ export default function AdminPage() {
                 <div className="admin-table-wrap">
                   <table>
                     <caption className="sr-only">Места на карте Atlas</caption>
-                    <thead><tr><th>Место</th><th>Категория</th><th>Статус</th><th>Подтверждения</th><th><span className="sr-only">Действия</span></th></tr></thead>
+                    <thead><tr><th>Место</th><th>Категория</th><th>Статус</th><th>Реакции</th><th>Комментарии</th><th><span className="sr-only">Действия</span></th></tr></thead>
                     <tbody>
                       {places.map((place) => (
                         <tr key={place.id}>
                           <td data-label="Место"><strong>{place.name}</strong><small>{place.address}</small></td>
                           <td data-label="Категория">{categoryLabels[place.category] ?? place.category}</td>
                           <td data-label="Статус"><span className={`status ${place.status}`}>{place.status === "published" ? "Опубликовано" : "Скрыто"}</span></td>
-                          <td data-label="Подтверждения" className="numeric">{place.verified_count}</td>
+                          <td data-label="Реакции" className="numeric"><span className="reaction-summary"><span>+{place.likes}</span><span>−{place.dislikes}</span></span></td>
+                          <td data-label="Комментарии" className="numeric">{place.comment_count}</td>
                           <td className="table-actions"><div className="row-actions"><button className="secondary-action" type="button" disabled={loading} onClick={() => setDialog({ kind: "place", item: place })}>Изменить</button><button className="visibility-action" type="button" disabled={loading} onClick={() => moderate(place)}>{place.status === "published" ? "Скрыть" : "Опубликовать"}</button></div></td>
                         </tr>
                       ))}

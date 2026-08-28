@@ -4,7 +4,7 @@ const contentSecurityPolicy = [
   "default-src 'self'",
   `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""}`,
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: https://tile.openstreetmap.org",
+  "img-src 'self' data: blob: https://tile.openstreetmap.org https://*.supabase.co",
   "connect-src 'self' https://tile.openstreetmap.org https://*.supabase.co",
   "font-src 'self' data:",
   "worker-src 'self' blob:",
@@ -17,6 +17,13 @@ const contentSecurityPolicy = [
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  images: {
+    remotePatterns: [{
+      protocol: "https",
+      hostname: "dxvmixtcymrbvwzlnrmy.supabase.co",
+      pathname: "/storage/v1/object/public/place-photos/**",
+    }],
+  },
   async headers() {
     return [{
       source: "/(.*)",

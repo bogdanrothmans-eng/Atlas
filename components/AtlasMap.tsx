@@ -1,16 +1,20 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as maplibregl from "maplibre-gl";
+import Image from "next/image";
 import Link from "next/link";
 import type { Map as MapLibreMap, Marker, StyleSpecification } from "maplibre-gl";
 import {
-  confirmPlace,
   createComment,
   createPlace,
   isSupabaseConfigured,
   loadPlaces,
+  reactToPlace,
+  reportPlace,
+  uploadPlacePhoto,
   type Category,
   type Comment,
   type Place,
+  type ReportReason,
 } from "../lib/atlasRepository";
 import { Icon, type IconName } from "./Icons";
 import { Modal } from "./Modal";
@@ -27,12 +31,12 @@ const categories: Record<Category, { label: string; icon: IconName; color: strin
 };
 
 const seedPlaces: Place[] = [
-  { id: "1", name: "Phuket Immigration Office", category: "documents", address: "Phuket Road, Phuket Town", description: "Иммиграционный офис: визы, продления и регистрация иностранцев.", lng: 98.3913, lat: 7.8663, verified: 18, addedBy: "Анна К.", comments: [{ id: "c1", author: "Михаил", text: "Лучше приезжать утром и заранее подготовить копии документов.", date: "12 августа" }] },
-  { id: "2", name: "HOMA Coworking", category: "work", address: "Samkong, Phuket Town", description: "Коворкинг со стабильным Wi‑Fi, переговорными и зонами для звонков.", lng: 98.3837, lat: 7.9061, verified: 31, addedBy: "Илья", comments: [] },
-  { id: "3", name: "Bangkok Hospital Phuket", category: "health", address: "Hongyok Utis Road", description: "Международная частная клиника. Персонал говорит по-английски.", lng: 98.3827, lat: 7.9041, verified: 12, addedBy: "София", comments: [] },
-  { id: "4", name: "Naka Weekend Market", category: "food", address: "Wirat Hong Yok Road", description: "Большой вечерний рынок с тайской едой, фруктами и локальными продуктами.", lng: 98.3729, lat: 7.8807, verified: 46, addedBy: "Команда Atlas", comments: [] },
-  { id: "5", name: "Karon Viewpoint", category: "leisure", address: "Karon, Mueang Phuket", description: "Смотровая площадка с видом на пляжи Ката Ной, Ката и Карон.", lng: 98.3026, lat: 7.7973, verified: 73, addedBy: "Команда Atlas", comments: [] },
-  { id: "6", name: "Rawai Park", category: "family", address: "Rawai, Mueang Phuket", description: "Семейный парк с игровыми зонами и бассейном для детей.", lng: 98.3278, lat: 7.7799, verified: 9, addedBy: "Мария", comments: [] },
+  { id: "1", name: "Phuket Immigration Office", category: "documents", address: "Phuket Road, Phuket Town", description: "Иммиграционный офис: визы, продления и регистрация иностранцев.", lng: 98.3913, lat: 7.8663, likes: 18, dislikes: 1, myReaction: null, addedBy: "Анна К.", photos: [], comments: [{ id: "c1", author: "Михаил", text: "Лучше приезжать утром и заранее подготовить копии документов.", date: "12 авг.", parentId: null, createdAt: new Date().toISOString() }] },
+  { id: "2", name: "HOMA Coworking", category: "work", address: "Samkong, Phuket Town", description: "Коворкинг со стабильным Wi‑Fi, переговорными и зонами для звонков.", lng: 98.3837, lat: 7.9061, likes: 31, dislikes: 2, myReaction: null, addedBy: "Илья", photos: [], comments: [] },
+  { id: "3", name: "Bangkok Hospital Phuket", category: "health", address: "Hongyok Utis Road", description: "Международная частная клиника. Персонал говорит по-английски.", lng: 98.3827, lat: 7.9041, likes: 12, dislikes: 1, myReaction: null, addedBy: "София", photos: [], comments: [] },
+  { id: "4", name: "Naka Weekend Market", category: "food", address: "Wirat Hong Yok Road", description: "Большой вечерний рынок с тайской едой, фруктами и локальными продуктами.", lng: 98.3729, lat: 7.8807, likes: 46, dislikes: 3, myReaction: null, addedBy: "Команда Atlas", photos: [], comments: [] },
+  { id: "5", name: "Karon Viewpoint", category: "leisure", address: "Karon, Mueang Phuket", description: "Смотровая площадка с видом на пляжи Ката Ной, Ката и Карон.", lng: 98.3026, lat: 7.7973, likes: 73, dislikes: 2, myReaction: null, addedBy: "Команда Atlas", photos: [], comments: [] },
+  { id: "6", name: "Rawai Park", category: "family", address: "Rawai, Mueang Phuket", description: "Семейный парк с игровыми зонами и бассейном для детей.", lng: 98.3278, lat: 7.7799, likes: 9, dislikes: 0, myReaction: null, addedBy: "Мария", photos: [], comments: [] },
 ];
 
 const osmStyle: StyleSpecification = {
@@ -51,11 +55,20 @@ const osmStyle: StyleSpecification = {
 
 const STORAGE_KEY = "atlas-demo-phuket-v1";
 const CLIENT_ID_KEY = "atlas-client-id-v1";
-const VERIFIED_STORAGE_KEY = "atlas-confirmed-places-v1";
 const ACTION_TIMES_STORAGE_KEY = "atlas-action-times-v1";
 const MIN_MARKER_DISTANCE = 58;
 const PLACE_SUBMISSION_INTERVAL = 10 * 60 * 1000;
 const COMMENT_SUBMISSION_INTERVAL = 30 * 1000;
+const PHOTO_SUBMISSION_INTERVAL = 60 * 1000;
+
+const reportReasons: Record<ReportReason, string> = {
+  inaccurate: "Неверная информация",
+  closed: "Место закрыто",
+  spam: "Спам или реклама",
+  harmful: "Опасный или недопустимый контент",
+  duplicate: "Дубликат места",
+  other: "Другая причина",
+};
 
 const markerSymbols: Record<Category, string> = {
   documents: "▤",
@@ -74,7 +87,7 @@ const getClientId = () => {
   return id;
 };
 
-const getActionWait = (action: "place" | "comment", interval: number) => {
+const getActionWait = (action: "place" | "comment" | "photo", interval: number) => {
   try {
     const stored = JSON.parse(localStorage.getItem(ACTION_TIMES_STORAGE_KEY) || "{}") as Record<string, number>;
     return Math.max(0, interval - (Date.now() - (stored[action] || 0)));
@@ -83,7 +96,7 @@ const getActionWait = (action: "place" | "comment", interval: number) => {
   }
 };
 
-const rememberAction = (action: "place" | "comment") => {
+const rememberAction = (action: "place" | "comment" | "photo") => {
   let stored: Record<string, number> = {};
   try { stored = JSON.parse(localStorage.getItem(ACTION_TIMES_STORAGE_KEY) || "{}"); } catch { /* Replace invalid state. */ }
   localStorage.setItem(ACTION_TIMES_STORAGE_KEY, JSON.stringify({ ...stored, [action]: Date.now() }));
@@ -147,14 +160,18 @@ export default function AtlasMap() {
   const [loadingPlaces, setLoadingPlaces] = useState(isSupabaseConfigured);
   const [savingPlace, setSavingPlace] = useState(false);
   const [savingComment, setSavingComment] = useState(false);
-  const [verifying, setVerifying] = useState(false);
-  const [verifiedIds, setVerifiedIds] = useState<Set<string>>(() => new Set());
+  const [reacting, setReacting] = useState(false);
+  const [replyTo, setReplyTo] = useState<Comment | null>(null);
+  const [photoOpen, setPhotoOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [savingPhoto, setSavingPhoto] = useState(false);
+  const [savingReport, setSavingReport] = useState(false);
 
   addingRef.current = adding;
 
   useEffect(() => {
     if (isSupabaseConfigured) {
-      loadPlaces()
+      loadPlaces(getClientId())
         .then((data) => {
           if (data.length) setPlaces(data);
         })
@@ -170,17 +187,12 @@ export default function AtlasMap() {
   }, []);
 
   useEffect(() => {
-    try {
-      const stored = JSON.parse(localStorage.getItem(VERIFIED_STORAGE_KEY) || "[]");
-      if (Array.isArray(stored)) setVerifiedIds(new Set(stored.filter((id): id is string => typeof id === "string")));
-    } catch {
-      localStorage.removeItem(VERIFIED_STORAGE_KEY);
-    }
-  }, []);
-
-  useEffect(() => {
     if (!isSupabaseConfigured) localStorage.setItem(STORAGE_KEY, JSON.stringify(places));
   }, [places]);
+
+  useEffect(() => {
+    setReplyTo(null);
+  }, [selected?.id]);
 
   useEffect(() => {
     if (!adding) return;
@@ -360,9 +372,12 @@ export default function AtlasMap() {
       description: String(data.get("description")).trim(),
       category: data.get("category") as Category,
       ...draft,
-      verified: 0,
+      likes: 0,
+      dislikes: 0,
+      myReaction: null,
       addedBy: "Гость",
       comments: [],
+      photos: [],
     };
     setSavingPlace(true);
     try {
@@ -394,7 +409,7 @@ export default function AtlasMap() {
     }
     const text = String(data.get("comment")).trim();
     if (!text) return;
-    let comment: Comment = { id: crypto.randomUUID(), author: "Гость", text, date: "сегодня" };
+    let comment: Comment = { id: crypto.randomUUID(), author: "Гость", text, date: "сегодня", parentId: replyTo?.id ?? null, createdAt: new Date().toISOString() };
     setSavingComment(true);
     try {
       if (isSupabaseConfigured) {
@@ -404,8 +419,9 @@ export default function AtlasMap() {
       const updated = { ...selected, comments: [...selected.comments, comment] };
       setPlaces((current) => current.map((place) => place.id === updated.id ? updated : place));
       setSelected(updated);
+      setReplyTo(null);
       event.currentTarget.reset();
-      setNotice("Комментарий опубликован");
+      setNotice(replyTo ? "Ответ опубликован" : "Комментарий опубликован");
     } catch {
       setNotice("Не удалось опубликовать комментарий. Повторите попытку.");
     } finally {
@@ -413,26 +429,92 @@ export default function AtlasMap() {
     }
   };
 
-  const verify = async () => {
-    if (!selected || verifying || verifiedIds.has(selected.id)) return;
-    setVerifying(true);
+  const react = async (reaction: -1 | 1) => {
+    if (!selected || reacting) return;
+    setReacting(true);
     try {
-      const count = isSupabaseConfigured ? await confirmPlace(selected.id, getClientId()) : selected.verified + 1;
-      const updated = { ...selected, verified: count };
+      const result: { likes: number; dislikes: number; myReaction: -1 | 1 | null } = isSupabaseConfigured
+        ? await reactToPlace(selected.id, reaction, getClientId())
+        : {
+            likes: selected.likes + (selected.myReaction === 1 ? -1 : 0) + (reaction === 1 && selected.myReaction !== 1 ? 1 : 0),
+            dislikes: selected.dislikes + (selected.myReaction === -1 ? -1 : 0) + (reaction === -1 && selected.myReaction !== -1 ? 1 : 0),
+            myReaction: selected.myReaction === reaction ? null : reaction,
+          };
+      const updated = { ...selected, ...result };
       setPlaces((current) => current.map((place) => place.id === updated.id ? updated : place));
       setSelected(updated);
-      setVerifiedIds((current) => {
-        const next = new Set(current).add(updated.id);
-        localStorage.setItem(VERIFIED_STORAGE_KEY, JSON.stringify(Array.from(next)));
-        return next;
-      });
-      setNotice("Спасибо — актуальность подтверждена");
-    } catch {
-      setNotice("Не удалось подтвердить актуальность. Повторите попытку.");
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : "Не удалось сохранить реакцию");
     } finally {
-      setVerifying(false);
+      setReacting(false);
     }
   };
+
+  const addPhoto = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selected || savingPhoto) return;
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const file = data.get("photo");
+    if (!(file instanceof File) || !file.size) return;
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      setNotice("Подойдут JPG, PNG или WebP");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setNotice("Фото должно быть меньше 5 МБ");
+      return;
+    }
+    const photoWait = getActionWait("photo", PHOTO_SUBMISSION_INTERVAL);
+    if (photoWait > 0) {
+      setNotice(`Следующее фото можно отправить через ${Math.ceil(photoWait / 1000)} сек.`);
+      return;
+    }
+    setSavingPhoto(true);
+    try {
+      await uploadPlacePhoto(selected.id, file, String(data.get("caption") || "").trim(), getClientId());
+      rememberAction("photo");
+      form.reset();
+      setPhotoOpen(false);
+      setNotice("Фото отправлено на модерацию");
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : "Не удалось загрузить фото");
+    } finally {
+      setSavingPhoto(false);
+    }
+  };
+
+  const submitReport = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selected || savingReport) return;
+    const data = new FormData(event.currentTarget);
+    setSavingReport(true);
+    try {
+      await reportPlace(selected.id, data.get("reason") as ReportReason, String(data.get("details") || "").trim(), getClientId());
+      setReportOpen(false);
+      setNotice("Жалоба отправлена. Спасибо, что помогаете Atlas.");
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : "Не удалось отправить жалобу");
+    } finally {
+      setSavingReport(false);
+    }
+  };
+
+  const commentThreads = useMemo(() => {
+    if (!selected) return [];
+    const byId = new Map(selected.comments.map((comment) => [comment.id, comment]));
+    const rootId = (comment: Comment) => {
+      let current = comment;
+      const visited = new Set<string>();
+      while (current.parentId && byId.has(current.parentId) && !visited.has(current.parentId)) {
+        visited.add(current.id);
+        current = byId.get(current.parentId)!;
+      }
+      return current.id;
+    };
+    const roots = selected.comments.filter((comment) => !comment.parentId || !byId.has(comment.parentId));
+    return roots.map((root) => ({ root, replies: selected.comments.filter((comment) => comment.id !== root.id && rootId(comment) === root.id) }));
+  }, [selected]);
 
   const activeCategory = selected ? categories[selected.category] : null;
   const hasFilters = Boolean(query.trim()) || filter !== "all";
@@ -562,31 +644,69 @@ export default function AtlasMap() {
             </div>
           </header>
           <div className="place-body">
-            <p className="verified"><Icon name="check" /> Проверено сообществом · {selected.verified}</p>
+            {selected.photos.length > 0 && (
+              <div className="place-gallery" aria-label={`Фотографии ${selected.name}`}>
+                {selected.photos.map((photo) => (
+                  <figure key={photo.id}>
+                    <Image src={photo.url} alt={photo.alt} fill sizes="(max-width: 48rem) 100vw, 25rem" />
+                    {photo.caption && <figcaption>{photo.caption}</figcaption>}
+                  </figure>
+                ))}
+              </div>
+            )}
             <p className="address"><Icon name="location" /> {selected.address}</p>
             <p className="description">{selected.description}</p>
             <p className="byline">Добавил: {selected.addedBy}</p>
 
-            <div className="card-actions">
-              <a className="primary-route" href={`https://www.openstreetmap.org/directions?to=${selected.lat},${selected.lng}`} target="_blank" rel="noreferrer">
-                <Icon name="route" /> Построить маршрут
+            <a className="primary-route" href={`https://www.openstreetmap.org/directions?to=${selected.lat},${selected.lng}`} target="_blank" rel="noreferrer">
+              <Icon name="route" /> Построить маршрут
+            </a>
+
+            <div className="social-actions" aria-label="Действия с местом">
+              <button className={selected.myReaction === 1 ? "is-active" : ""} type="button" onClick={() => react(1)} disabled={reacting} aria-pressed={selected.myReaction === 1} aria-label={`Нравится, ${selected.likes}`}>
+                <Icon name="thumb-up" /><span>{selected.likes}</span>
+              </button>
+              <button className={selected.myReaction === -1 ? "is-negative" : ""} type="button" onClick={() => react(-1)} disabled={reacting} aria-pressed={selected.myReaction === -1} aria-label={`Не нравится, ${selected.dislikes}`}>
+                <Icon name="thumb-down" /><span>{selected.dislikes}</span>
+              </button>
+              <a href="#place-comments" aria-label={`Комментарии, ${selected.comments.length}`}>
+                <Icon name="message" /><span>{selected.comments.length}</span>
               </a>
-              <button type="button" onClick={verify} disabled={verifying || verifiedIds.has(selected.id)}>
-                <Icon name="check" />
-                {verifiedIds.has(selected.id) ? "Актуальность подтверждена" : verifying ? "Подтверждаем…" : "Подтвердить актуальность"}
+              <button type="button" onClick={() => setPhotoOpen(true)} aria-label="Добавить фото">
+                <Icon name="camera" /><span className="action-label">Фото</span>
               </button>
             </div>
+            <button className="report-action" type="button" onClick={() => setReportOpen(true)}><Icon name="flag" /> Пожаловаться на место</button>
 
-            <section className="comments">
+            <section className="comments" id="place-comments">
               <div className="comments-heading">
-                <div><p className="eyebrow">Опыт сообщества</p><h3>Комментарии</h3></div>
-                <span>{selected.comments.length}</span>
+                <div><p className="eyebrow">Обсуждение</p><h3>Комментарии <span>{selected.comments.length}</span></h3></div>
               </div>
-              {selected.comments.map((comment) => (
-                <article key={comment.id}>
-                  <header><strong>{comment.author}</strong><time>{comment.date}</time></header>
-                  <p>{comment.text}</p>
-                </article>
+              {commentThreads.map(({ root, replies }) => (
+                <div className="comment-thread" key={root.id}>
+                  <article className="comment-item">
+                    <div className="comment-avatar" aria-hidden="true">{root.author.slice(0, 1).toUpperCase()}</div>
+                    <div className="comment-content">
+                      <header><strong>{root.author}</strong><time dateTime={root.createdAt}>{root.date}</time></header>
+                      <p>{root.text}</p>
+                      <button type="button" onClick={() => setReplyTo(root)}>Ответить</button>
+                    </div>
+                  </article>
+                  {replies.length > 0 && (
+                    <div className="comment-replies">
+                      {replies.map((reply) => (
+                        <article className="comment-item" key={reply.id}>
+                          <div className="comment-avatar is-reply" aria-hidden="true">{reply.author.slice(0, 1).toUpperCase()}</div>
+                          <div className="comment-content">
+                            <header><strong>{reply.author}</strong><time dateTime={reply.createdAt}>{reply.date}</time></header>
+                            <p>{reply.text}</p>
+                            <button type="button" onClick={() => setReplyTo(reply)}>Ответить</button>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  )}
+                </div>
               ))}
               {!selected.comments.length && (
                 <div className="comments-empty">
@@ -596,16 +716,60 @@ export default function AtlasMap() {
               )}
               <form onSubmit={addComment}>
                 <input className="honeypot" name="website" type="text" tabIndex={-1} autoComplete="off" aria-hidden="true" />
-                <label htmlFor="comment">Ваш комментарий</label>
-                <textarea id="comment" name="comment" maxLength={1000} required placeholder="Например: когда лучше приехать и что взять с собой" />
-                <button className="primary" type="submit" disabled={savingComment}>
-                  {savingComment ? "Публикуем…" : "Опубликовать комментарий"}
-                </button>
+                {replyTo && <div className="replying-to"><span>Ответ для <strong>{replyTo.author}</strong></span><button type="button" aria-label="Отменить ответ" onClick={() => setReplyTo(null)}><Icon name="close" /></button></div>}
+                <label className="sr-only" htmlFor="comment">Ваш комментарий</label>
+                <div className="comment-composer">
+                  <textarea id="comment" name="comment" maxLength={1000} required placeholder={replyTo ? `Ответить ${replyTo.author}…` : "Добавить комментарий…"} />
+                  <button type="submit" disabled={savingComment} aria-label={savingComment ? "Публикуем комментарий" : "Опубликовать комментарий"}><Icon name="send" /></button>
+                </div>
               </form>
             </section>
           </div>
         </aside>
       )}
+
+      <Modal open={photoOpen} onClose={() => setPhotoOpen(false)} labelledBy="photo-title">
+        {selected && (
+          <section className="modal social-modal">
+            <button className="close" type="button" aria-label="Закрыть окно" onClick={() => setPhotoOpen(false)}><Icon name="close" /></button>
+            <div className="modal-icon" aria-hidden="true"><Icon name="camera" /></div>
+            <p className="eyebrow">Фото сообщества</p>
+            <h2 id="photo-title">Добавить фото</h2>
+            <p className="modal-description">Покажите, как выглядит «{selected.name}». Фото появится после проверки модератором.</p>
+            <form onSubmit={addPhoto}>
+              <label className="file-drop" htmlFor="place-photo">
+                <Icon name="camera" />
+                <span><strong>Выберите фото</strong><small>JPG, PNG или WebP до 5 МБ</small></span>
+              </label>
+              <input className="file-input" id="place-photo" name="photo" type="file" accept="image/jpeg,image/png,image/webp" required data-initial-focus />
+              <label htmlFor="photo-caption">Подпись <span className="optional">необязательно</span></label>
+              <input id="photo-caption" name="caption" maxLength={240} placeholder="Что изображено на фото" />
+              <div className="modal-actions"><button type="button" onClick={() => setPhotoOpen(false)}>Отменить</button><button className="primary" type="submit" disabled={savingPhoto}>{savingPhoto ? "Загружаем…" : "Отправить на проверку"}</button></div>
+            </form>
+          </section>
+        )}
+      </Modal>
+
+      <Modal open={reportOpen} onClose={() => setReportOpen(false)} labelledBy="report-title">
+        {selected && (
+          <section className="modal social-modal">
+            <button className="close" type="button" aria-label="Закрыть окно" onClick={() => setReportOpen(false)}><Icon name="close" /></button>
+            <div className="modal-icon report-icon" aria-hidden="true"><Icon name="flag" /></div>
+            <p className="eyebrow">Безопасность сообщества</p>
+            <h2 id="report-title">Пожаловаться на место</h2>
+            <p className="modal-description">Сообщите, что не так с «{selected.name}». Модератор проверит жалобу.</p>
+            <form onSubmit={submitReport}>
+              <label htmlFor="report-reason">Причина</label>
+              <select id="report-reason" name="reason" defaultValue="inaccurate" data-initial-focus>
+                {(Object.entries(reportReasons) as [ReportReason, string][]).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
+              </select>
+              <label htmlFor="report-details">Комментарий <span className="optional">необязательно</span></label>
+              <textarea id="report-details" name="details" maxLength={1000} placeholder="Добавьте детали, которые помогут разобраться" />
+              <div className="modal-actions"><button type="button" onClick={() => setReportOpen(false)}>Отменить</button><button className="primary" type="submit" disabled={savingReport}>{savingReport ? "Отправляем…" : "Отправить жалобу"}</button></div>
+            </form>
+          </section>
+        )}
+      </Modal>
 
       <Modal open={Boolean(draft)} onClose={() => setDraft(null)} labelledBy="add-title" returnFocus={addButtonRef}>
         {draft && (
