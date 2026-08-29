@@ -15,7 +15,7 @@ export type ReactionResult = { likes: number; dislikes: number; myReaction: Reac
 const url = supabaseUrl;
 const key = supabasePublishableKey;
 export const isSupabaseConfigured = Boolean(url && key);
-const headers = () => ({ apikey: key!, Authorization: `Bearer ${key}`, "Content-Type": "application/json" });
+const headers = (accessToken?: string) => ({ apikey: key!, Authorization: `Bearer ${accessToken || key}`, "Content-Type": "application/json" });
 
 type DbComment = { id: string; author: string; body: string; parent_id: string | null; created_at: string };
 type DbPhoto = { id: string; storage_path: string; caption: string; alt_text: string; created_at: string };
@@ -43,9 +43,9 @@ const fromDb = (row: DbPlace): Place => ({
   })),
 });
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit, accessToken?: string): Promise<T> {
   if (!url || !key) throw new Error("Supabase не настроен");
-  const response = await fetch(`${url}/rest/v1/${path}`, { ...init, headers: { ...headers(), ...init?.headers } });
+  const response = await fetch(`${url}/rest/v1/${path}`, { ...init, headers: { ...headers(accessToken), ...init?.headers } });
   if (!response.ok) {
     const body = await response.json().catch(() => ({})) as Record<string, string>;
     throw new Error(body.message || body.hint || `Supabase: ${response.status}`);
@@ -54,51 +54,51 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export async function loadPlaces(clientId: string): Promise<Place[]> {
-  const rows = await request<DbPlace[]>("rpc/atlas_places", { method: "POST", body: JSON.stringify({ visitor_id: clientId }) });
+export async function loadPlaces(visitorId: string, accessToken?: string): Promise<Place[]> {
+  const rows = await request<DbPlace[]>("rpc/atlas_places", { method: "POST", body: JSON.stringify({ visitor_id: visitorId }) }, accessToken);
   return rows.map(fromDb);
 }
 
-export async function createPlace(place: Place, clientId: string): Promise<void> {
+export async function createPlace(place: Place, userId: string, accessToken: string): Promise<void> {
   await request<string>("rpc/submit_place", {
     method: "POST",
     body: JSON.stringify({
       new_id: place.id, new_name: place.name, new_category: place.category,
       new_address: place.address, new_description: place.description,
       new_longitude: place.lng, new_latitude: place.lat,
-      new_added_by: place.addedBy, client_id: clientId,
+      new_added_by: place.addedBy, client_id: userId,
     }),
-  });
+  }, accessToken);
 }
 
-export async function createComment(placeId: string, comment: Comment, clientId: string): Promise<Comment> {
+export async function createComment(placeId: string, comment: Comment, userId: string, accessToken: string): Promise<Comment> {
   const row = await request<DbComment>("rpc/submit_comment_v2", {
     method: "POST",
     body: JSON.stringify({
       new_id: comment.id, target_place_id: placeId, parent_comment_id: comment.parentId,
-      new_author: comment.author, new_body: comment.text, client_id: clientId,
+      new_author: comment.author, new_body: comment.text, client_id: userId,
     }),
-  });
+  }, accessToken);
   return fromDbComment(row);
 }
 
-export async function reactToPlace(placeId: string, reaction: Exclude<Reaction, null>, clientId: string) {
+export async function reactToPlace(placeId: string, reaction: Exclude<Reaction, null>, userId: string, accessToken: string) {
   const result = await request<{ likes: number; dislikes: number; my_reaction: Reaction }>("rpc/react_to_place", {
     method: "POST",
-    body: JSON.stringify({ target_place_id: placeId, client_id: clientId, new_reaction: reaction }),
-  });
+    body: JSON.stringify({ target_place_id: placeId, client_id: userId, new_reaction: reaction }),
+  }, accessToken);
   return { likes: Number(result.likes), dislikes: Number(result.dislikes), myReaction: result.my_reaction ?? null } satisfies ReactionResult;
 }
 
-export async function uploadPlacePhoto(placeId: string, file: File, caption: string, clientId: string) {
+export async function uploadPlacePhoto(placeId: string, file: File, caption: string, userId: string, accessToken: string) {
   if (!url || !key) throw new Error("Supabase не настроен");
   const rawExtension = (file.name.split(".").pop() || "jpg").toLowerCase();
   const extension = rawExtension === "jpeg" ? "jpg" : rawExtension;
   const photoId = crypto.randomUUID();
-  const storagePath = `${placeId}/${clientId}/${photoId}.${extension}`;
+  const storagePath = `${placeId}/${userId}/${photoId}.${extension}`;
   const upload = await fetch(`${url}/storage/v1/object/place-photos/${storagePath}`, {
     method: "POST",
-    headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": file.type, "x-upsert": "false" },
+    headers: { apikey: key, Authorization: `Bearer ${accessToken}`, "Content-Type": file.type, "x-upsert": "false" },
     body: file,
   });
   if (!upload.ok) {
@@ -109,14 +109,14 @@ export async function uploadPlacePhoto(placeId: string, file: File, caption: str
     method: "POST",
     body: JSON.stringify({
       new_id: photoId, target_place_id: placeId, new_storage_path: storagePath,
-      new_caption: caption, new_alt_text: caption, client_id: clientId,
+      new_caption: caption, new_alt_text: caption, client_id: userId,
     }),
-  });
+  }, accessToken);
 }
 
-export async function reportPlace(placeId: string, reason: ReportReason, details: string, clientId: string) {
+export async function reportPlace(placeId: string, reason: ReportReason, details: string, userId: string, accessToken: string) {
   return request<string>("rpc/submit_place_report", {
     method: "POST",
-    body: JSON.stringify({ target_place_id: placeId, client_id: clientId, new_reason: reason, new_details: details }),
-  });
+    body: JSON.stringify({ target_place_id: placeId, client_id: userId, new_reason: reason, new_details: details }),
+  }, accessToken);
 }

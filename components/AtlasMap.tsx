@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as maplibregl from "maplibre-gl";
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/router";
 import type { Map as MapLibreMap, Marker, StyleSpecification } from "maplibre-gl";
 import {
   createComment,
@@ -18,6 +19,7 @@ import {
 } from "../lib/atlasRepository";
 import { Icon, type IconName } from "./Icons";
 import { Modal } from "./Modal";
+import { useAuth, userDisplayName } from "./AuthProvider";
 
 type MarkerEntry = { marker: Marker; element: HTMLButtonElement; place: Place };
 
@@ -87,19 +89,19 @@ const getClientId = () => {
   return id;
 };
 
-const getActionWait = (action: "place" | "comment" | "photo", interval: number) => {
+const getActionWait = (action: "place" | "comment" | "photo", interval: number, actorId: string) => {
   try {
     const stored = JSON.parse(localStorage.getItem(ACTION_TIMES_STORAGE_KEY) || "{}") as Record<string, number>;
-    return Math.max(0, interval - (Date.now() - (stored[action] || 0)));
+    return Math.max(0, interval - (Date.now() - (stored[`${actorId}:${action}`] || 0)));
   } catch {
     return 0;
   }
 };
 
-const rememberAction = (action: "place" | "comment" | "photo") => {
+const rememberAction = (action: "place" | "comment" | "photo", actorId: string) => {
   let stored: Record<string, number> = {};
   try { stored = JSON.parse(localStorage.getItem(ACTION_TIMES_STORAGE_KEY) || "{}"); } catch { /* Replace invalid state. */ }
-  localStorage.setItem(ACTION_TIMES_STORAGE_KEY, JSON.stringify({ ...stored, [action]: Date.now() }));
+  localStorage.setItem(ACTION_TIMES_STORAGE_KEY, JSON.stringify({ ...stored, [`${actorId}:${action}`]: Date.now() }));
 };
 
 const spreadOverlappingMarkers = (map: MapLibreMap, entries: MarkerEntry[]) => {
@@ -143,12 +145,15 @@ const spreadOverlappingMarkers = (map: MapLibreMap, entries: MarkerEntry[]) => {
 };
 
 export default function AtlasMap() {
+  const router = useRouter();
+  const { session, user, loading: sessionLoading } = useAuth();
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const markersRef = useRef<Map<string, MarkerEntry>>(new Map());
   const addingRef = useRef(false);
   const addButtonRef = useRef<HTMLButtonElement>(null);
   const hasFitInitialPlacesRef = useRef(false);
+  const handledIntentRef = useRef("");
 
   const [places, setPlaces] = useState<Place[]>(seedPlaces);
   const [selected, setSelected] = useState<Place | null>(null);
@@ -169,9 +174,22 @@ export default function AtlasMap() {
 
   addingRef.current = adding;
 
+  const sendGuestToAuth = (intent: "add-place" | "comment" | "like" | "dislike" | "photo" | "report", placeId?: string) => {
+    const params = new URLSearchParams({ intent });
+    if (placeId) params.set("place", placeId);
+    void router.push(`/auth?next=${encodeURIComponent(`/?${params.toString()}`)}`);
+  };
+
+  const requireMember = (intent: "add-place" | "comment" | "like" | "dislike" | "photo" | "report", placeId?: string) => {
+    if (user && session) return true;
+    sendGuestToAuth(intent, placeId);
+    return false;
+  };
+
   useEffect(() => {
+    if (sessionLoading) return;
     if (isSupabaseConfigured) {
-      loadPlaces(getClientId())
+      loadPlaces(user?.id || getClientId(), session?.access_token)
         .then((data) => {
           if (data.length) setPlaces(data);
         })
@@ -184,7 +202,7 @@ export default function AtlasMap() {
       }
       setLoadingPlaces(false);
     }
-  }, []);
+  }, [session?.access_token, sessionLoading, user?.id]);
 
   useEffect(() => {
     if (!isSupabaseConfigured) localStorage.setItem(STORAGE_KEY, JSON.stringify(places));
@@ -330,6 +348,7 @@ export default function AtlasMap() {
   }, [loadingPlaces, places]);
 
   const beginAdding = () => {
+    if (!requireMember("add-place")) return;
     setAdding(true);
     setSelected(null);
     setNotice("");
@@ -357,10 +376,14 @@ export default function AtlasMap() {
 
   const addPlace = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!user || !session) {
+      sendGuestToAuth("add-place");
+      return;
+    }
     if (!draft || savingPlace) return;
     const data = new FormData(event.currentTarget);
     if (String(data.get("website") || "").trim()) return;
-    const placeWait = getActionWait("place", PLACE_SUBMISSION_INTERVAL);
+    const placeWait = getActionWait("place", PLACE_SUBMISSION_INTERVAL, user.id);
     if (isSupabaseConfigured && placeWait > 0) {
       setNotice(`Новое место можно отправить через ${Math.ceil(placeWait / 60000)} мин.`);
       return;
@@ -375,15 +398,15 @@ export default function AtlasMap() {
       likes: 0,
       dislikes: 0,
       myReaction: null,
-      addedBy: "Гость",
+      addedBy: userDisplayName(user),
       comments: [],
       photos: [],
     };
     setSavingPlace(true);
     try {
       if (isSupabaseConfigured) {
-        await createPlace(place, getClientId());
-        rememberAction("place");
+        await createPlace(place, user.id, session.access_token);
+        rememberAction("place", user.id);
       } else {
         setPlaces((current) => [...current, place]);
         setSelected(place);
@@ -399,22 +422,26 @@ export default function AtlasMap() {
 
   const addComment = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!user || !session) {
+      sendGuestToAuth("comment", selected?.id);
+      return;
+    }
     if (!selected || savingComment) return;
     const data = new FormData(event.currentTarget);
     if (String(data.get("website") || "").trim()) return;
-    const commentWait = getActionWait("comment", COMMENT_SUBMISSION_INTERVAL);
+    const commentWait = getActionWait("comment", COMMENT_SUBMISSION_INTERVAL, user.id);
     if (isSupabaseConfigured && commentWait > 0) {
       setNotice(`Следующий комментарий можно отправить через ${Math.ceil(commentWait / 1000)} сек.`);
       return;
     }
     const text = String(data.get("comment")).trim();
     if (!text) return;
-    let comment: Comment = { id: crypto.randomUUID(), author: "Гость", text, date: "сегодня", parentId: replyTo?.id ?? null, createdAt: new Date().toISOString() };
+    let comment: Comment = { id: crypto.randomUUID(), author: userDisplayName(user), text, date: "сегодня", parentId: replyTo?.id ?? null, createdAt: new Date().toISOString() };
     setSavingComment(true);
     try {
       if (isSupabaseConfigured) {
-        comment = await createComment(selected.id, comment, getClientId());
-        rememberAction("comment");
+        comment = await createComment(selected.id, comment, user.id, session.access_token);
+        rememberAction("comment", user.id);
       }
       const updated = { ...selected, comments: [...selected.comments, comment] };
       setPlaces((current) => current.map((place) => place.id === updated.id ? updated : place));
@@ -431,10 +458,14 @@ export default function AtlasMap() {
 
   const react = async (reaction: -1 | 1) => {
     if (!selected || reacting) return;
+    if (!user || !session) {
+      sendGuestToAuth(reaction === 1 ? "like" : "dislike", selected.id);
+      return;
+    }
     setReacting(true);
     try {
       const result: { likes: number; dislikes: number; myReaction: -1 | 1 | null } = isSupabaseConfigured
-        ? await reactToPlace(selected.id, reaction, getClientId())
+        ? await reactToPlace(selected.id, reaction, user.id, session.access_token)
         : {
             likes: selected.likes + (selected.myReaction === 1 ? -1 : 0) + (reaction === 1 && selected.myReaction !== 1 ? 1 : 0),
             dislikes: selected.dislikes + (selected.myReaction === -1 ? -1 : 0) + (reaction === -1 && selected.myReaction !== -1 ? 1 : 0),
@@ -452,6 +483,10 @@ export default function AtlasMap() {
 
   const addPhoto = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!user || !session) {
+      sendGuestToAuth("photo", selected?.id);
+      return;
+    }
     if (!selected || savingPhoto) return;
     const form = event.currentTarget;
     const data = new FormData(form);
@@ -465,15 +500,15 @@ export default function AtlasMap() {
       setNotice("Фото должно быть меньше 5 МБ");
       return;
     }
-    const photoWait = getActionWait("photo", PHOTO_SUBMISSION_INTERVAL);
+    const photoWait = getActionWait("photo", PHOTO_SUBMISSION_INTERVAL, user.id);
     if (photoWait > 0) {
       setNotice(`Следующее фото можно отправить через ${Math.ceil(photoWait / 1000)} сек.`);
       return;
     }
     setSavingPhoto(true);
     try {
-      await uploadPlacePhoto(selected.id, file, String(data.get("caption") || "").trim(), getClientId());
-      rememberAction("photo");
+      await uploadPlacePhoto(selected.id, file, String(data.get("caption") || "").trim(), user.id, session.access_token);
+      rememberAction("photo", user.id);
       form.reset();
       setPhotoOpen(false);
       setNotice("Фото отправлено на модерацию");
@@ -486,11 +521,15 @@ export default function AtlasMap() {
 
   const submitReport = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!user || !session) {
+      sendGuestToAuth("report", selected?.id);
+      return;
+    }
     if (!selected || savingReport) return;
     const data = new FormData(event.currentTarget);
     setSavingReport(true);
     try {
-      await reportPlace(selected.id, data.get("reason") as ReportReason, String(data.get("details") || "").trim(), getClientId());
+      await reportPlace(selected.id, data.get("reason") as ReportReason, String(data.get("details") || "").trim(), user.id, session.access_token);
       setReportOpen(false);
       setNotice("Жалоба отправлена. Спасибо, что помогаете Atlas.");
     } catch (cause) {
@@ -499,6 +538,53 @@ export default function AtlasMap() {
       setSavingReport(false);
     }
   };
+
+  const startReply = (comment: Comment) => {
+    if (!requireMember("comment", selected?.id)) return;
+    setReplyTo(comment);
+    requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>("#comment")?.focus());
+  };
+
+  useEffect(() => {
+    if (!router.isReady || !places.length) return;
+    const intent = typeof router.query.intent === "string" ? router.query.intent : "";
+    const placeId = typeof router.query.place === "string" ? router.query.place : "";
+    if (!intent) return;
+
+    const target = placeId ? places.find((place) => place.id === placeId) : undefined;
+    if (placeId && !target) return;
+    if (target) setSelected(target);
+    if (!user || !session) return;
+
+    const intentKey = `${user.id}:${intent}:${placeId}`;
+    if (handledIntentRef.current === intentKey) return;
+    handledIntentRef.current = intentKey;
+
+    if (intent === "add-place") {
+      setSelected(null);
+      setAdding(true);
+      setNotice("Вы вошли. Теперь выберите место на карте.");
+    } else if (target && intent === "photo") {
+      setPhotoOpen(true);
+    } else if (target && intent === "report") {
+      setReportOpen(true);
+    } else if (target && intent === "comment") {
+      requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>("#comment")?.focus());
+    } else if (target && (intent === "like" || intent === "dislike")) {
+      const reaction = intent === "like" ? 1 : -1;
+      setReacting(true);
+      reactToPlace(target.id, reaction, user.id, session.access_token)
+        .then((result) => {
+          const updated = { ...target, ...result };
+          setPlaces((current) => current.map((place) => place.id === target.id ? updated : place));
+          setSelected(updated);
+        })
+        .catch((cause) => setNotice(cause instanceof Error ? cause.message : "Не удалось сохранить реакцию"))
+        .finally(() => setReacting(false));
+    }
+
+    void router.replace("/", undefined, { shallow: true });
+  }, [places, router, router.isReady, router.query.intent, router.query.place, session, user]);
 
   const commentThreads = useMemo(() => {
     if (!selected) return [];
@@ -561,8 +647,8 @@ export default function AtlasMap() {
           <Icon name={adding ? "close" : "plus"} />
           <span>{adding ? "Отменить" : "Добавить место"}</span>
         </button>
-        <Link className="profile-link" href="/profile" aria-label="Открыть профиль администратора">
-          <Icon name="user" />
+        <Link className="profile-link" href={user ? "/profile" : `/auth?next=${encodeURIComponent("/profile")}`} aria-label={user ? `Открыть профиль: ${userDisplayName(user)}` : "Войти в Atlas"}>
+          {user ? <span className="profile-initial" aria-hidden="true">{userDisplayName(user).slice(0, 1).toUpperCase()}</span> : <Icon name="user" />}
         </Link>
       </header>
 
@@ -672,11 +758,11 @@ export default function AtlasMap() {
               <a href="#place-comments" aria-label={`Комментарии, ${selected.comments.length}`}>
                 <Icon name="message" /><span>{selected.comments.length}</span>
               </a>
-              <button type="button" onClick={() => setPhotoOpen(true)} aria-label="Добавить фото">
+              <button type="button" onClick={() => requireMember("photo", selected.id) && setPhotoOpen(true)} aria-label="Добавить фото">
                 <Icon name="camera" /><span className="action-label">Фото</span>
               </button>
             </div>
-            <button className="report-action" type="button" onClick={() => setReportOpen(true)}><Icon name="flag" /> Пожаловаться на место</button>
+            <button className="report-action" type="button" onClick={() => requireMember("report", selected.id) && setReportOpen(true)}><Icon name="flag" /> Пожаловаться на место</button>
 
             <section className="comments" id="place-comments">
               <div className="comments-heading">
@@ -689,7 +775,7 @@ export default function AtlasMap() {
                     <div className="comment-content">
                       <header><strong>{root.author}</strong><time dateTime={root.createdAt}>{root.date}</time></header>
                       <p>{root.text}</p>
-                      <button type="button" onClick={() => setReplyTo(root)}>Ответить</button>
+                      <button type="button" onClick={() => startReply(root)}>Ответить</button>
                     </div>
                   </article>
                   {replies.length > 0 && (
@@ -700,7 +786,7 @@ export default function AtlasMap() {
                           <div className="comment-content">
                             <header><strong>{reply.author}</strong><time dateTime={reply.createdAt}>{reply.date}</time></header>
                             <p>{reply.text}</p>
-                            <button type="button" onClick={() => setReplyTo(reply)}>Ответить</button>
+                            <button type="button" onClick={() => startReply(reply)}>Ответить</button>
                           </div>
                         </article>
                       ))}
@@ -714,15 +800,23 @@ export default function AtlasMap() {
                   <p>Пока нет комментариев. Расскажите, что важно знать об этом месте.</p>
                 </div>
               )}
-              <form onSubmit={addComment}>
-                <input className="honeypot" name="website" type="text" tabIndex={-1} autoComplete="off" aria-hidden="true" />
-                {replyTo && <div className="replying-to"><span>Ответ для <strong>{replyTo.author}</strong></span><button type="button" aria-label="Отменить ответ" onClick={() => setReplyTo(null)}><Icon name="close" /></button></div>}
-                <label className="sr-only" htmlFor="comment">Ваш комментарий</label>
-                <div className="comment-composer">
-                  <textarea id="comment" name="comment" maxLength={1000} required placeholder={replyTo ? `Ответить ${replyTo.author}…` : "Добавить комментарий…"} />
-                  <button type="submit" disabled={savingComment} aria-label={savingComment ? "Публикуем комментарий" : "Опубликовать комментарий"}><Icon name="send" /></button>
-                </div>
-              </form>
+              {user && session ? (
+                <form onSubmit={addComment}>
+                  <input className="honeypot" name="website" type="text" tabIndex={-1} autoComplete="off" aria-hidden="true" />
+                  {replyTo && <div className="replying-to"><span>Ответ для <strong>{replyTo.author}</strong></span><button type="button" aria-label="Отменить ответ" onClick={() => setReplyTo(null)}><Icon name="close" /></button></div>}
+                  <label className="sr-only" htmlFor="comment">Ваш комментарий</label>
+                  <div className="comment-composer">
+                    <textarea id="comment" name="comment" maxLength={1000} required placeholder={replyTo ? `Ответить ${replyTo.author}…` : "Добавить комментарий…"} />
+                    <button type="submit" disabled={savingComment} aria-label={savingComment ? "Публикуем комментарий" : "Опубликовать комментарий"}><Icon name="send" /></button>
+                  </div>
+                </form>
+              ) : (
+                <button className="guest-composer" type="button" onClick={() => sendGuestToAuth("comment", selected.id)}>
+                  <span className="guest-composer-icon" aria-hidden="true"><Icon name="user" /></span>
+                  <span><strong>Войдите, чтобы комментировать</strong><small>Ответы и обсуждения доступны участникам Atlas</small></span>
+                  <Icon name="chevron-right" />
+                </button>
+              )}
             </section>
           </div>
         </aside>

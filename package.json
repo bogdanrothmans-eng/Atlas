@@ -10,6 +10,7 @@
     "ai:generate": "tsx index.ts"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.112.4",
     "ai": "^7.0.77",
     "dotenv": "^17.4.2",
     "maplibre-gl": "^6.5.0",
