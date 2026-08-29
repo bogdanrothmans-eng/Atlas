@@ -97,7 +97,7 @@ export default function AuthPage() {
 
   return <>
     <Head>
-      <title>{mode === "signin" ? "Вход" : "Регистрация"} — Atlas</title>
+      <title>{`${mode === "signin" ? "Вход" : "Регистрация"} — Atlas`}</title>
       <meta name="description" content="Войдите в Atlas, чтобы добавлять места и участвовать в обсуждениях." />
       <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     </Head>
