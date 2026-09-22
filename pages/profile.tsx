@@ -2,17 +2,47 @@ import Head from "next/head";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { useState } from "react";
-import { useAuth, userDisplayName } from "../components/AuthProvider";
-import { Icon } from "../components/Icons";
-import { supabase } from "../lib/supabaseClient";
+import {
+  ArrowLeft,
+  Camera,
+  ChevronRight,
+  Flag,
+  MapPin,
+  MessageSquare,
+  Shield,
+  ThumbsUp,
+  User,
+  type LucideIcon,
+} from "lucide-react";
 
-const capabilities = [
-  { icon: "location" as const, title: "Добавлять места", text: "Новые точки отправляются на модерацию." },
-  { icon: "message" as const, title: "Обсуждать", text: "Пишите комментарии и отвечайте другим." },
-  { icon: "thumb-up" as const, title: "Оценивать", text: "Ставьте лайки и дизлайки полезным местам." },
-  { icon: "camera" as const, title: "Добавлять фото", text: "Показывайте актуальный вид места." },
-  { icon: "flag" as const, title: "Сообщать о проблемах", text: "Отправляйте жалобы модераторам Atlas." },
+import { useAuth, userDisplayName } from "@/components/AuthProvider";
+import { Brand } from "@/components/Brand";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { supabase } from "@/lib/supabaseClient";
+
+const capabilities: { icon: LucideIcon; title: string; text: string }[] = [
+  { icon: MapPin, title: "Добавлять места", text: "Новые точки отправляются на модерацию." },
+  { icon: MessageSquare, title: "Обсуждать", text: "Пишите комментарии и отвечайте другим." },
+  { icon: ThumbsUp, title: "Оценивать", text: "Ставьте лайки и дизлайки полезным местам." },
+  { icon: Camera, title: "Добавлять фото", text: "Показывайте актуальный вид места." },
+  { icon: Flag, title: "Сообщать о проблемах", text: "Отправляйте жалобы модераторам Atlas." },
 ];
+
+const providerLabel = (provider: string) => {
+  if (provider === "custom:telegram") return "Telegram";
+  if (provider === "facebook") return "Facebook";
+  if (provider === "google") return "Google";
+  return "email";
+};
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -27,38 +57,132 @@ export default function ProfilePage() {
     await router.replace("/");
   };
 
-  return <>
-    <Head><title>Профиль — Atlas</title><meta name="robots" content="noindex,nofollow" /></Head>
-    <div className="account-page">
-      <header className="account-header">
-        <Link href="/" className="brand" aria-label="Atlas — вернуться на карту"><span className="brand-mark" aria-hidden="true">A</span><span className="brand-name">Atlas</span></Link>
-        <Link className="back-to-map" href="/"><Icon name="arrow-left" /> Карта</Link>
-      </header>
-      <main className="account-main">
-        {loading ? <p className="account-loading" role="status">Загружаем профиль…</p> : !user ? (
-          <section className="account-guest" aria-labelledby="guest-title">
-            <div className="account-avatar"><Icon name="user" /></div>
-            <p className="eyebrow">Гостевой режим</p>
-            <h1 id="guest-title">Войдите, чтобы участвовать</h1>
-            <p>Карта доступна без регистрации. Вход нужен только для публикаций, реакций и жалоб.</p>
-            <Link className="primary" href="/auth?next=%2Fprofile">Войти или создать аккаунт</Link>
-            <Link href="/">Продолжить как гость</Link>
-          </section>
-        ) : (
-          <>
-            <section className="account-hero" aria-labelledby="profile-title">
-              <div className="account-avatar" aria-hidden="true">{name.slice(0, 1).toUpperCase()}</div>
-              <div><p className="eyebrow">Профиль Atlas</p><h1 id="profile-title">{name}</h1><p>{user.email || "Аккаунт без email"} · вход через {provider === "custom:telegram" ? "Telegram" : provider === "facebook" ? "Facebook" : provider === "google" ? "Google" : "email"}</p></div>
-              <button type="button" onClick={logout} disabled={signingOut}>{signingOut ? "Выходим…" : "Выйти"}</button>
-            </section>
-            <section className="account-capabilities" aria-labelledby="capabilities-title">
-              <div><p className="eyebrow">Ваши возможности</p><h2 id="capabilities-title">Участвуйте в жизни карты</h2></div>
-              <div className="capability-grid">{capabilities.map((item) => <article key={item.title}><Icon name={item.icon} /><div><h3>{item.title}</h3><p>{item.text}</p></div></article>)}</div>
-            </section>
-            {user.email?.toLowerCase() === "mrgold2332@ya.ru" && <Link className="admin-profile-link" href="/admin"><Icon name="work" /> Открыть панель администратора <Icon name="chevron-right" /></Link>}
-          </>
-        )}
-      </main>
-    </div>
-  </>;
+  return (
+    <>
+      <Head>
+        <title>Профиль — Atlas</title>
+        <meta name="robots" content="noindex,nofollow" />
+      </Head>
+      <div className="bg-muted/40 flex min-h-svh flex-col">
+        <header className="bg-background flex h-14 items-center justify-between gap-3 border-b px-4 sm:px-6">
+          <Brand />
+          <Button asChild variant="ghost" size="sm">
+            <Link href="/">
+              <ArrowLeft /> Карта
+            </Link>
+          </Button>
+        </header>
+
+        <main className="mx-auto w-full max-w-3xl flex-1 space-y-6 p-4 sm:p-6">
+          {loading ? (
+            <div className="space-y-4" role="status">
+              <span className="sr-only">Загружаем профиль…</span>
+              <Skeleton className="h-28 w-full" />
+              <Skeleton className="h-56 w-full" />
+            </div>
+          ) : !user ? (
+            <Card className="mx-auto max-w-md text-center">
+              <CardContent className="flex flex-col items-center gap-4">
+                <Avatar className="size-12">
+                  <AvatarFallback>
+                    <User className="size-5" />
+                  </AvatarFallback>
+                </Avatar>
+                <div className="space-y-2">
+                  <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+                    Гостевой режим
+                  </p>
+                  <h1 className="text-2xl font-semibold tracking-tight">
+                    Войдите, чтобы участвовать
+                  </h1>
+                  <p className="text-muted-foreground text-sm text-pretty">
+                    Карта доступна без регистрации. Вход нужен только для
+                    публикаций, реакций и жалоб.
+                  </p>
+                </div>
+                <Button asChild className="w-full">
+                  <Link href="/auth?next=%2Fprofile">
+                    Войти или создать аккаунт
+                  </Link>
+                </Button>
+                <Button asChild variant="link">
+                  <Link href="/">Продолжить как гость</Link>
+                </Button>
+              </CardContent>
+            </Card>
+          ) : (
+            <>
+              <Card>
+                <CardContent className="flex flex-wrap items-center gap-4">
+                  <Avatar className="size-12">
+                    <AvatarFallback className="text-base">
+                      {name.slice(0, 1).toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+                      Профиль Atlas
+                    </p>
+                    <h1 className="truncate text-xl font-semibold tracking-tight">
+                      {name}
+                    </h1>
+                    <p className="text-muted-foreground truncate text-sm">
+                      {user.email || "Аккаунт без email"} · вход через{" "}
+                      {providerLabel(provider)}
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    onClick={logout}
+                    disabled={signingOut}
+                  >
+                    {signingOut ? "Выходим…" : "Выйти"}
+                  </Button>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+                    Ваши возможности
+                  </p>
+                  <CardTitle className="text-xl tracking-tight">
+                    Участвуйте в жизни карты
+                  </CardTitle>
+                  <CardDescription>
+                    Что доступно участникам сообщества Atlas.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-3 sm:grid-cols-2">
+                  {capabilities.map(({ icon: CapabilityIcon, title, text }) => (
+                    <article
+                      key={title}
+                      className="bg-muted/40 flex items-start gap-3 rounded-lg border p-3"
+                    >
+                      <CapabilityIcon className="text-muted-foreground mt-0.5 size-4 shrink-0" />
+                      <div className="space-y-0.5">
+                        <h3 className="text-sm font-medium">{title}</h3>
+                        <p className="text-muted-foreground text-sm">{text}</p>
+                      </div>
+                    </article>
+                  ))}
+                </CardContent>
+              </Card>
+
+              {user.email?.toLowerCase() === "mrgold2332@ya.ru" && (
+                <Button asChild variant="outline" className="w-full justify-between">
+                  <Link href="/admin">
+                    <span className="flex items-center gap-2">
+                      <Shield /> Открыть панель администратора
+                    </span>
+                    <ChevronRight />
+                  </Link>
+                </Button>
+              )}
+            </>
+          )}
+        </main>
+      </div>
+    </>
+  );
 }
