@@ -217,3 +217,27 @@
   border-radius: var(--radius) !important;
   box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05), 0 0 0 1px var(--border) !important;
 }
+
+/*
+ * WCAG 2.2 AA Target Size (Minimum): pointer targets need 24x24 CSS px unless
+ * an exception applies. Sonner ships its close button at 20px.
+ */
+[data-sonner-toast][data-styled="true"] button[data-close-button] {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+/*
+ * Honour prefers-reduced-motion across the whole app. The shadcn dialog and
+ * toast animations come from tw-animate-css, which is not gated on its own.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

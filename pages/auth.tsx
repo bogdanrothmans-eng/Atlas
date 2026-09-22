@@ -348,7 +348,9 @@ export default function AuthPage() {
                         {mode === "signin" && (
                           <Link
                             href="/forgot-password"
-                            className="text-muted-foreground text-sm underline-offset-4 hover:underline"
+                            // Standalone link, so the WCAG inline-target
+                            // exception does not apply: hold it at 24px.
+                            className="text-muted-foreground inline-flex min-h-6 items-center text-sm underline-offset-4 hover:underline"
                           >
                             Восстановить пароль
                           </Link>

@@ -694,7 +694,8 @@ export default function AtlasMap() {
         <Button
           variant="link"
           size="sm"
-          className="h-auto p-0 text-xs"
+          // min-h-6 keeps the target at the 24px WCAG 2.2 AA minimum.
+          className="h-auto min-h-6 p-0 text-xs"
           onClick={() => startReply(comment)}
         >
           Ответить
