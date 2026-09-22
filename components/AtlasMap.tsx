@@ -132,6 +132,16 @@ const markerSymbols: Record<Category, string> = {
   leisure: "✦",
 };
 
+/*
+ * Cross-fades a pair of icons that occupy the same slot. No motion library is
+ * installed, so both icons stay in the DOM and animate with CSS transitions.
+ */
+const iconSwap = (visible: boolean) =>
+  cn(
+    "transition-[opacity,scale,filter] duration-300 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none",
+    visible ? "scale-100 opacity-100 blur-0" : "scale-25 opacity-0 blur-[4px]",
+  );
+
 const getClientId = () => {
   const stored = localStorage.getItem(CLIENT_ID_KEY);
   if (stored) return stored;
@@ -713,7 +723,7 @@ export default function AtlasMap() {
       />
 
       <div className="pointer-events-none absolute inset-x-0 top-0 z-20 space-y-2 p-3">
-        <header className="bg-background pointer-events-auto mx-auto flex max-w-5xl flex-wrap items-center gap-2 rounded-xl border p-2 shadow-sm">
+        <header className="bg-background pointer-events-auto mx-auto flex max-w-5xl flex-wrap items-center gap-2 rounded-2xl border p-2 shadow-sm">
           <button
             type="button"
             onClick={resetDiscovery}
@@ -771,7 +781,10 @@ export default function AtlasMap() {
             aria-pressed={adding}
             onClick={adding ? cancelAdding : beginAdding}
           >
-            {adding ? <X /> : <Plus />}
+            <span className="relative grid size-4 shrink-0 place-items-center">
+              <Plus className={cn("absolute", iconSwap(!adding))} />
+              <X className={cn("absolute", iconSwap(adding))} />
+            </span>
             <span className="hidden sm:inline">
               {adding ? "Отменить" : "Добавить место"}
             </span>
@@ -959,7 +972,7 @@ export default function AtlasMap() {
                   {selected.photos.map((photo) => (
                     <figure
                       key={photo.id}
-                      className="bg-muted relative aspect-video w-60 shrink-0 overflow-hidden rounded-lg border"
+                      className="bg-muted image-outline relative aspect-video w-60 shrink-0 overflow-hidden rounded-lg"
                     >
                       <Image
                         src={photo.url}

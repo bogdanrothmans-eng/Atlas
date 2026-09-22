@@ -60,6 +60,7 @@
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
+  --image-outline: oklch(0 0 0 / 0.1);
 }
 
 .dark {
@@ -87,11 +88,30 @@
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
+  --image-outline: oklch(1 0 0 / 0.1);
+}
+
+/*
+ * A 1px outline gives images consistent depth. The colour is pure black in
+ * light mode and pure white in dark mode — a tinted neutral would pick up the
+ * surface beneath it and read as dirt along the image edge.
+ */
+@utility image-outline {
+  outline: 1px solid var(--image-outline);
+  outline-offset: -1px;
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
+  }
+
+  /*
+   * Lucide draws at stroke-width 2, which is heavier than the regular-weight
+   * text these icons sit beside. 1.5 matches their optical weight.
+   */
+  svg.lucide {
+    stroke-width: 1.5;
   }
 
   html,

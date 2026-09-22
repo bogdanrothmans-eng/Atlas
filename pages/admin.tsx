@@ -612,7 +612,7 @@ export default function AdminPage() {
                             key={photo.id}
                             className="overflow-hidden rounded-lg border"
                           >
-                            <div className="bg-muted relative aspect-video">
+                            <div className="bg-muted image-outline relative aspect-video">
                               <Image
                                 src={adminPhotoUrl(photo)}
                                 alt={
