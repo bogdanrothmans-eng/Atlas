@@ -13,3 +13,7 @@ pnpm-debug.log*
 .next-dev.*.log
 
 .vercel
+
+# Python bytecode, e.g. from running the ui-ux-pro-max search script
+__pycache__/
+*.pyc
