@@ -136,81 +136,24 @@
 }
 
 /*
- * MapLibre markers are created imperatively outside React, so their styling
- * stays in plain CSS. Everything else is Tailwind + shadcn/ui.
+ * MapLibre positions each marker host; the pin inside is a React portal
+ * (components/PlacePin.tsx) styled with Tailwind. The host is a zero-size
+ * point on the coordinate, so the pin centres itself on it.
  */
-@layer components {
-  .place-marker-anchor {
-    width: 3rem;
-    height: 3.5rem;
-    pointer-events: none;
-  }
-
-  .place-marker {
-    position: relative;
-    isolation: isolate;
-    display: grid;
-    place-items: start center;
-    width: 100%;
-    height: 100%;
-    padding: 0.78rem 0 0;
-    border: 0;
-    border-radius: 1.5rem;
-    color: #ffffff;
-    background: transparent;
-    font-size: 1rem;
-    font-weight: 900;
-    line-height: 1;
-    pointer-events: auto;
-    touch-action: manipulation;
-  }
-
-  .place-marker::before {
-    content: "";
-    position: absolute;
-    z-index: -1;
-    inset-block-start: 0;
-    inset-inline-start: 0.125rem;
-    width: 2.75rem;
-    height: 2.75rem;
-    border: 3px solid #ffffff;
-    border-radius: 50%;
-    background: var(--marker);
-    box-shadow: 0 0 0 1px rgb(10 28 18 / 12%), 0 5px 16px rgb(10 28 18 / 30%);
-  }
-
-  .place-marker::after {
-    content: "";
-    position: absolute;
-    z-index: -2;
-    inset-block-start: 2.25rem;
-    inset-inline-start: 1.125rem;
-    width: 0.75rem;
-    height: 0.75rem;
-    rotate: 45deg;
-    border-radius: 0 0 0.2rem;
-    background: var(--marker);
-    box-shadow: 2px 2px 3px rgb(10 28 18 / 18%);
-  }
-
-  .place-marker-symbol {
-    position: relative;
-    z-index: 1;
-  }
-
-  .place-marker:hover::before {
-    box-shadow: 0 0 0 2px rgb(255 255 255 / 78%), 0 8px 20px rgb(10 28 18 / 36%);
-  }
-
-  .place-marker.is-selected::before {
-    box-shadow: 0 0 0 4px rgb(255 255 255 / 82%), 0 8px 22px rgb(10 28 18 / 38%);
-  }
+.place-marker-anchor {
+  width: 0;
+  height: 0;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .place-marker::before {
-    transition: box-shadow 120ms ease-out;
-  }
+/* Hosts are siblings, so later pins paint over earlier ones. Lift the one being
+   pointed at or focused, and keep the selected pin above everything. */
+.place-marker-anchor:has(.place-marker:hover),
+.place-marker-anchor:has(.place-marker:focus-visible) {
+  z-index: 2;
+}
+
+.place-marker-anchor:has(.place-marker[aria-pressed="true"]) {
+  z-index: 3;
 }
 
 .maplibregl-ctrl-group {

@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import * as maplibregl from "maplibre-gl";
 import Image from "next/image";
 import Link from "next/link";
@@ -38,6 +39,7 @@ import { useAuth, userDisplayName } from "@/components/AuthProvider";
 import { BrandMark } from "@/components/Brand";
 import { CitySwitcher } from "@/components/CitySwitcher";
 import { FiltersSheet } from "@/components/FiltersSheet";
+import { PlacePin, type LabelSide } from "@/components/PlacePin";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -78,7 +80,8 @@ import {
 } from "@/lib/cities";
 import { cn } from "@/lib/utils";
 
-type MarkerEntry = { marker: Marker; element: HTMLButtonElement; place: Place };
+// `element` hosts a React portal that renders the PlacePin.
+type MarkerEntry = { marker: Marker; element: HTMLDivElement; place: Place };
 
 const seedPlaces: Place[] = [
   { id: "1", name: "Phuket Immigration Office", category: "documents", address: "Phuket Road, Phuket Town", description: "Иммиграционный офис: визы, продления и регистрация иностранцев.", lng: 98.3913, lat: 7.8663, likes: 18, dislikes: 1, myReaction: null, addedBy: "Анна К.", photos: [], comments: [{ id: "c1", author: "Михаил", text: "Лучше приезжать утром и заранее подготовить копии документов.", date: "12 авг.", parentId: null, createdAt: new Date().toISOString() }] },
@@ -107,7 +110,8 @@ const STORAGE_KEY = "atlas-demo-phuket-v1";
 const CLIENT_ID_KEY = "atlas-client-id-v1";
 const ACTION_TIMES_STORAGE_KEY = "atlas-action-times-v1";
 const CITY_STORAGE_KEY = "atlas-city-v1";
-const MIN_MARKER_DISTANCE = 58;
+// 32px pins plus a gap; pins closer than this are nudged apart.
+const MIN_MARKER_DISTANCE = 40;
 const PLACE_SUBMISSION_INTERVAL = 10 * 60 * 1000;
 const COMMENT_SUBMISSION_INTERVAL = 30 * 1000;
 const PHOTO_SUBMISSION_INTERVAL = 60 * 1000;
@@ -119,15 +123,6 @@ const reportReasons: Record<ReportReason, string> = {
   harmful: "Опасный или недопустимый контент",
   duplicate: "Дубликат места",
   other: "Другая причина",
-};
-
-const markerSymbols: Record<Category, string> = {
-  documents: "▤",
-  health: "+",
-  food: "⌁",
-  work: "◇",
-  family: "♥",
-  leisure: "✦",
 };
 
 /*
@@ -199,9 +194,155 @@ const spreadOverlappingMarkers = (map: MapLibreMap, entries: MarkerEntry[]) => {
   entries.forEach((entry, index) => {
     const offset = offsets[index];
     entry.marker.setOffset([Math.round(offset.x), Math.round(offset.y)]);
-    entry.element.classList.toggle("is-displaced", Math.hypot(offset.x, offset.y) > 2);
   });
+  return points.map((point, index) => ({
+    x: point.x + offsets[index].x,
+    y: point.y + offsets[index].y,
+  }));
 };
+
+/*
+ * Pin layout, recomputed on zoom and resize:
+ *
+ * - Below SPREAD_ZOOM, pins that would overlap merge into a cluster shown on
+ *   its most-liked member. Zooming in is what separates them, so clicking a
+ *   cluster zooms to its members. The selected place never joins a cluster.
+ * - From SPREAD_ZOOM up, zooming no longer separates places that share a
+ *   building, so overlapping pins are nudged apart instead.
+ * - Labels go to single pins greedily, selected first, then by likes. Each
+ *   tries the right of its pin, then the left, and is dropped only if neither
+ *   side clears every other label and pin. The selected label always shows,
+ *   on the right.
+ */
+const CLUSTER_RADIUS = 40;
+const SPREAD_ZOOM = 17;
+const LABEL_HEIGHT = 20;
+const LABEL_GAP = 18; // from the pin's centre to the label's left edge
+const PIN_RADIUS = 18; // covers both a 32px pin and a 36px cluster
+const LABEL_CLEARANCE = 4; // keeps labels from touching their neighbours
+
+type PinLayout = {
+  labels: Map<string, LabelSide>;
+  hidden: Set<string>;
+  clusters: Map<string, string[]>;
+};
+
+const byPriority = (selectedId: string | null) => (a: MarkerEntry, b: MarkerEntry) => {
+  if (a.place.id === selectedId) return -1;
+  if (b.place.id === selectedId) return 1;
+  return b.place.likes - a.place.likes;
+};
+
+const layoutPins = (
+  map: MapLibreMap,
+  entries: MarkerEntry[],
+  selectedId: string | null,
+): PinLayout => {
+  const hidden = new Set<string>();
+  const clusters = new Map<string, string[]>();
+  let points: { x: number; y: number }[];
+
+  if (map.getZoom() >= SPREAD_ZOOM) {
+    points = spreadOverlappingMarkers(map, entries);
+  } else {
+    entries.forEach(({ marker }) => marker.setOffset([0, 0]));
+    points = entries.map(({ place }) => map.project([place.lng, place.lat]));
+    const index = new Map(entries.map((entry, i) => [entry, i]));
+    const order = [...entries].sort(byPriority(selectedId));
+    const taken = new Set<string>();
+    for (const leader of order) {
+      const id = leader.place.id;
+      if (taken.has(id)) continue;
+      taken.add(id);
+      if (id === selectedId) continue;
+      const origin = points[index.get(leader)!];
+      const members = [id];
+      for (const other of order) {
+        const otherId = other.place.id;
+        if (taken.has(otherId) || otherId === selectedId) continue;
+        const point = points[index.get(other)!];
+        if (Math.hypot(point.x - origin.x, point.y - origin.y) < CLUSTER_RADIUS) {
+          taken.add(otherId);
+          hidden.add(otherId);
+          members.push(otherId);
+        }
+      }
+      if (members.length > 1) clusters.set(id, members);
+    }
+  }
+
+  const shownOnMap = entries
+    .map((entry, i) => ({ entry, point: points[i] }))
+    .filter(({ entry }) => !hidden.has(entry.place.id));
+  const obstacles = shownOnMap.map(({ entry, point }) => ({
+    id: entry.place.id,
+    left: point.x - PIN_RADIUS,
+    right: point.x + PIN_RADIUS,
+    top: point.y - PIN_RADIUS,
+    bottom: point.y + PIN_RADIUS,
+  }));
+  const overlaps = (
+    a: { left: number; right: number; top: number; bottom: number },
+    b: { left: number; right: number; top: number; bottom: number },
+  ) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+
+  const labels = new Map<string, LabelSide>();
+  const placed: { left: number; right: number; top: number; bottom: number }[] = [];
+  shownOnMap
+    .filter(({ entry }) => !clusters.has(entry.place.id))
+    .sort((a, b) => byPriority(selectedId)(a.entry, b.entry))
+    .forEach(({ entry, point }) => {
+      const width =
+        entry.element.querySelector<HTMLElement>(".place-marker-label")?.offsetWidth ?? 0;
+      if (!width) return;
+      const rectFor = (side: LabelSide) => {
+        const near = LABEL_GAP - LABEL_CLEARANCE;
+        const far = LABEL_GAP + width + LABEL_CLEARANCE;
+        return {
+          left: side === "right" ? point.x + near : point.x - far,
+          right: side === "right" ? point.x + far : point.x - near,
+          top: point.y - LABEL_HEIGHT / 2 - LABEL_CLEARANCE,
+          bottom: point.y + LABEL_HEIGHT / 2 + LABEL_CLEARANCE,
+        };
+      };
+      const clear = (rect: ReturnType<typeof rectFor>) =>
+        !placed.some((other) => overlaps(rect, other)) &&
+        !obstacles.some((pin) => pin.id !== entry.place.id && overlaps(rect, pin));
+
+      const isSelected = entry.place.id === selectedId;
+      const side: LabelSide | null = isSelected
+        ? "right"
+        : clear(rectFor("right"))
+          ? "right"
+          : clear(rectFor("left"))
+            ? "left"
+            : null;
+      if (!side) return;
+      placed.push(rectFor(side));
+      labels.set(entry.place.id, side);
+    });
+
+  return { labels, hidden, clusters };
+};
+
+/*
+ * Padding for fitting places into view. Top is the header bottom + 56px for
+ * the selected pin, which lifts above its coordinate, + a 12px margin:
+ * 120 + 56 + 12 on mobile, 56 + 56 + 12 on desktop. Desktop keeps 380px on
+ * the left clear of the intro card and the place panel; right and bottom
+ * clear MapLibre's zoom buttons and attribution in the bottom-right corner.
+ */
+const fitPadding = () =>
+  window.innerWidth <= 700
+    ? { top: 188, right: 56, bottom: 72, left: 24 }
+    : { top: 124, right: 72, bottom: 72, left: 380 };
+
+const layoutKey = ({ labels, hidden, clusters }: PinLayout) =>
+  [
+    [...labels].map(([id, side]) => `${id}:${side}`).sort().join(","),
+    [...hidden].sort().join(","),
+    [...clusters].map(([id, members]) => `${id}:${members.length}`).sort().join(","),
+  ].join("|");
 
 export default function AtlasMap() {
   const router = useRouter();
@@ -216,6 +357,14 @@ export default function AtlasMap() {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const [titleHidden, setTitleHidden] = useState(false);
+  const [pinHosts, setPinHosts] = useState<MarkerEntry[]>([]);
+  const [pinLayout, setPinLayout] = useState<PinLayout>({
+    labels: new Map(),
+    hidden: new Set(),
+    clusters: new Map(),
+  });
+  const selectedIdRef = useRef<string | null>(null);
+  const layoutRef = useRef<() => void>(() => {});
   const hasFitInitialPlacesRef = useRef(false);
   const handledIntentRef = useRef("");
 
@@ -357,6 +506,8 @@ export default function AtlasMap() {
     };
   }, []);
 
+  selectedIdRef.current = selected?.id ?? null;
+
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -364,36 +515,27 @@ export default function AtlasMap() {
     markersRef.current.forEach(({ marker }) => marker.remove());
     const entries = new Map<string, MarkerEntry>();
 
+    // MapLibre owns position; React renders the pin into each host through a
+    // portal, so pins share the app's icons, tokens and state.
     visible.forEach((place) => {
-      const category = categories[place.category];
-      const anchor = document.createElement("div");
-      anchor.className = "place-marker-anchor";
-      const element = document.createElement("button");
-      element.className = "place-marker";
-      element.type = "button";
-      element.title = place.name;
-      element.setAttribute("aria-label", `${category.label}: ${place.name}`);
-      element.setAttribute("aria-pressed", "false");
-      element.style.setProperty("--marker", category.color);
-      const symbol = document.createElement("span");
-      symbol.className = "place-marker-symbol";
-      symbol.setAttribute("aria-hidden", "true");
-      symbol.textContent = markerSymbols[place.category];
-      element.appendChild(symbol);
-      anchor.appendChild(element);
-      element.addEventListener("click", (event) => {
-        event.stopPropagation();
-        setSelected(place);
-      });
-      const marker = new maplibregl.Marker({ element: anchor, anchor: "bottom" })
+      const element = document.createElement("div");
+      element.className = "place-marker-anchor";
+      const marker = new maplibregl.Marker({ element, anchor: "center" })
         .setLngLat([place.lng, place.lat])
         .addTo(map);
       entries.set(place.id, { marker, element, place });
     });
 
     markersRef.current = entries;
-    const updateLayout = () => spreadOverlappingMarkers(map, Array.from(entries.values()));
-    updateLayout();
+    const list = Array.from(entries.values());
+    setPinHosts(list);
+
+    const updateLayout = () => {
+      const next = layoutPins(map, list, selectedIdRef.current);
+      // Zoom fires every frame; only re-render when the layout really changes.
+      setPinLayout((current) => (layoutKey(current) === layoutKey(next) ? current : next));
+    };
+    layoutRef.current = updateLayout;
     map.on("zoom", updateLayout);
     map.on("resize", updateLayout);
 
@@ -405,13 +547,12 @@ export default function AtlasMap() {
     };
   }, [visible]);
 
+  // Labels are measured from the rendered portals, so lay out once they exist,
+  // and again when the selection changes which label takes priority.
   useEffect(() => {
-    markersRef.current.forEach(({ element, place }) => {
-      const isSelected = selected?.id === place.id;
-      element.classList.toggle("is-selected", isSelected);
-      element.setAttribute("aria-pressed", String(isSelected));
-    });
-  }, [selected?.id]);
+    const frame = requestAnimationFrame(() => layoutRef.current());
+    return () => cancelAnimationFrame(frame);
+  }, [pinHosts, selected?.id]);
 
   // Move focus to the panel so keyboard and screen-reader users land on what
   // they just opened instead of staying on the pin.
@@ -419,44 +560,47 @@ export default function AtlasMap() {
     if (selected) headingRef.current?.focus({ preventScroll: true });
   }, [selected?.id]);
 
-  // Keep the selected pin visible. The panel covers the left of the map on
-  // desktop and its lower part on mobile, so if the pin sits under it (or
-  // under the header), ease it to the centre of the area that is left.
+  // Ease a point into the part of the map nothing covers: below the header,
+  // and beside (desktop) or above (mobile) the place panel when it is open.
+  // Used for the selected pin, which the panel may have just covered, and for
+  // a pin reached by keyboard while off-screen, so focus never lands out of
+  // sight. Non-essential, so MapLibre skips it under prefers-reduced-motion.
+  const revealPoint = (lng: number, lat: number) => {
+    const map = mapRef.current;
+    if (!map) return;
+    const box = map.getContainer().getBoundingClientRect();
+    const panel = cardRef.current?.getBoundingClientRect();
+    const headerBottom = (headerRef.current?.getBoundingClientRect().bottom ?? box.top) - box.top;
+    const PIN_HEIGHT = 56; // the selected pin lifts above its coordinate
+    const MARGIN = 16;
+    const isSheet = Boolean(panel && panel.width >= box.width - 1);
+    const area = {
+      left: panel && !isSheet ? panel.right - box.left + MARGIN : MARGIN,
+      right: box.width - MARGIN,
+      top: headerBottom + PIN_HEIGHT + MARGIN,
+      bottom: panel && isSheet ? panel.top - box.top - MARGIN : box.height - MARGIN,
+    };
+    if (area.right <= area.left || area.bottom <= area.top) return;
+    const point = map.project([lng, lat]);
+    const visible =
+      point.x >= area.left && point.x <= area.right &&
+      point.y >= area.top && point.y <= area.bottom;
+    if (visible) return;
+    map.easeTo({
+      center: [lng, lat],
+      offset: [
+        (area.left + area.right) / 2 - box.width / 2,
+        (area.top + area.bottom) / 2 - box.height / 2,
+      ],
+      duration: 450,
+      essential: false,
+    });
+  };
+
   useEffect(() => {
     if (!selected) return;
-    const frame = requestAnimationFrame(() => {
-      const map = mapRef.current;
-      const card = cardRef.current;
-      if (!map || !card) return;
-      const box = map.getContainer().getBoundingClientRect();
-      const panel = card.getBoundingClientRect();
-      const headerBottom = (headerRef.current?.getBoundingClientRect().bottom ?? box.top) - box.top;
-      const PIN_HEIGHT = 56; // the pin draws above its coordinate
-      const MARGIN = 16;
-      const isSheet = panel.width >= box.width - 1;
-      const area = {
-        left: isSheet ? MARGIN : panel.right - box.left + MARGIN,
-        right: box.width - MARGIN,
-        top: headerBottom + PIN_HEIGHT + MARGIN,
-        bottom: isSheet ? panel.top - box.top - MARGIN : box.height - MARGIN,
-      };
-      if (area.right <= area.left || area.bottom <= area.top) return;
-      const point = map.project([selected.lng, selected.lat]);
-      const visible =
-        point.x >= area.left && point.x <= area.right &&
-        point.y >= area.top && point.y <= area.bottom;
-      if (visible) return;
-      map.easeTo({
-        center: [selected.lng, selected.lat],
-        offset: [
-          (area.left + area.right) / 2 - box.width / 2,
-          (area.top + area.bottom) / 2 - box.height / 2,
-        ],
-        duration: 450,
-        // Non-essential, so MapLibre skips it under prefers-reduced-motion.
-        essential: false,
-      });
-    });
+    // Wait a frame so the panel is laid out before measuring what it covers.
+    const frame = requestAnimationFrame(() => revealPoint(selected.lng, selected.lat));
     return () => cancelAnimationFrame(frame);
   }, [selected?.id]);
 
@@ -478,11 +622,32 @@ export default function AtlasMap() {
     return () => observer.disconnect();
   }, [selected?.id]);
 
+  // Zoom to a cluster's members. Capped at SPREAD_ZOOM: past it they no
+  // longer merge, so pins that share a building are nudged apart instead.
+  const expandCluster = (ids: string[]) => {
+    const map = mapRef.current;
+    if (!map) return;
+    const bounds = new maplibregl.LngLatBounds();
+    ids.forEach((id) => {
+      const place = markersRef.current.get(id)?.place;
+      if (place) bounds.extend([place.lng, place.lat]);
+    });
+    map.fitBounds(bounds, {
+      padding: fitPadding(),
+      maxZoom: SPREAD_ZOOM,
+      duration: 450,
+      essential: false,
+    });
+  };
+
   const closePlace = () => {
     const id = selected?.id;
     setSelected(null);
     // Hand focus back to the pin that opened the panel.
-    if (id) requestAnimationFrame(() => markersRef.current.get(id)?.element.focus());
+    if (id)
+      requestAnimationFrame(() =>
+        markersRef.current.get(id)?.element.querySelector("button")?.focus(),
+      );
   };
 
   const fitPlacesInView = (targets: Place[], animated = false) => {
@@ -490,13 +655,8 @@ export default function AtlasMap() {
     if (!map || !targets.length) return;
     const bounds = new maplibregl.LngLatBounds();
     targets.forEach((place) => bounds.extend([place.lng, place.lat]));
-    const compact = window.innerWidth <= 700;
     map.fitBounds(bounds, {
-      padding: compact
-        // Header bottom + the 56px pin, which draws above its coordinate,
-        // + a 12px margin: 120 + 56 + 12 on mobile, 56 + 56 + 12 on desktop.
-        ? { top: 188, right: 24, bottom: 40, left: 24 }
-        : { top: 124, right: 40, bottom: 40, left: 380 },
+      padding: fitPadding(),
       maxZoom: 12.5,
       duration: animated ? 420 : 0,
       essential: false,
@@ -949,6 +1109,22 @@ export default function AtlasMap() {
         aria-busy={loadingPlaces}
         tabIndex={-1}
       />
+      {pinHosts.map(({ element, place }) =>
+        createPortal(
+          <PlacePin
+            place={place}
+            selected={selected?.id === place.id}
+            labelSide={pinLayout.labels.get(place.id) ?? null}
+            hidden={pinLayout.hidden.has(place.id)}
+            clusterSize={pinLayout.clusters.get(place.id)?.length ?? 1}
+            onSelect={() => setSelected(place)}
+            onExpand={() => expandCluster(pinLayout.clusters.get(place.id) ?? [])}
+            onFocus={() => revealPoint(place.lng, place.lat)}
+          />,
+          element,
+          place.id,
+        ),
+      )}
 
 
       {!selected && !adding && visible.length > 0 && (
