@@ -90,7 +90,7 @@ export async function reactToPlace(placeId: string, reaction: Exclude<Reaction, 
   return { likes: Number(result.likes), dislikes: Number(result.dislikes), myReaction: result.my_reaction ?? null } satisfies ReactionResult;
 }
 
-export async function uploadPlacePhoto(placeId: string, file: File, caption: string, userId: string, accessToken: string) {
+export async function uploadPlacePhoto(placeId: string, file: File, caption: string, userId: string, accessToken: string): Promise<PlacePhoto> {
   if (!url || !key) throw new Error("Supabase не настроен");
   const rawExtension = (file.name.split(".").pop() || "jpg").toLowerCase();
   const extension = rawExtension === "jpeg" ? "jpg" : rawExtension;
@@ -112,6 +112,7 @@ export async function uploadPlacePhoto(placeId: string, file: File, caption: str
       new_caption: caption, new_alt_text: caption, client_id: userId,
     }),
   }, accessToken);
+  return { id: photoId, url: publicPhotoUrl(storagePath), caption, alt: caption, createdAt: new Date().toISOString() };
 }
 
 export async function reportPlace(placeId: string, reason: ReportReason, details: string, userId: string, accessToken: string) {

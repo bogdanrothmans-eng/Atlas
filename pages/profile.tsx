@@ -1,7 +1,7 @@
 import Head from "next/head";
 import Link from "next/link";
 import { useRouter } from "next/router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ArrowLeft,
   Camera,
@@ -30,7 +30,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { supabase } from "@/lib/supabaseClient";
 
 const capabilities: { icon: LucideIcon; title: string; text: string }[] = [
-  { icon: MapPin, title: "Добавлять места", text: "Новые точки отправляются на модерацию." },
+  { icon: MapPin, title: "Добавлять места", text: "Новые точки сразу появляются на карте." },
   { icon: MessageSquare, title: "Обсуждать", text: "Пишите комментарии и отвечайте другим." },
   { icon: ThumbsUp, title: "Оценивать", text: "Ставьте лайки и дизлайки полезным местам." },
   { icon: Camera, title: "Добавлять фото", text: "Показывайте актуальный вид места." },
@@ -48,8 +48,22 @@ export default function ProfilePage() {
   const router = useRouter();
   const { user, loading } = useAuth();
   const [signingOut, setSigningOut] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const name = userDisplayName(user);
   const provider = String(user?.app_metadata.provider || "email");
+
+  // Admin rights live in the admin_users table, so ask the database rather
+  // than hardcoding an address here.
+  useEffect(() => {
+    if (!user) return;
+    let active = true;
+    supabase.rpc("is_atlas_admin").then(({ data }) => {
+      if (active) setIsAdmin(data === true);
+    });
+    return () => {
+      active = false;
+    };
+  }, [user]);
 
   const logout = async () => {
     setSigningOut(true);
@@ -169,7 +183,7 @@ export default function ProfilePage() {
                 </CardContent>
               </Card>
 
-              {user.email?.toLowerCase() === "mrgold2332@ya.ru" && (
+              {isAdmin && (
                 <Button asChild variant="outline" className="w-full justify-between">
                   <Link href="/admin">
                     <span className="flex items-center gap-2">

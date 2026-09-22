@@ -90,7 +90,7 @@ begin
 
   insert into public.places (id, name, category, address, description, longitude, latitude, added_by, status)
   values (new_id, trim(new_name), new_category, trim(new_address), trim(new_description),
-    new_longitude, new_latitude, display_name, 'hidden');
+    new_longitude, new_latitude, display_name, 'published');
 
   insert into public.submission_limits (visitor_id, action, last_submitted_at)
   values (current_user_id, 'place', now())
@@ -208,7 +208,7 @@ begin
   end if;
 
   insert into public.place_photos (id, place_id, storage_path, caption, alt_text, visitor_id, status)
-  values (new_id, target_place_id, new_storage_path, trim(new_caption), trim(new_alt_text), current_user_id, 'hidden');
+  values (new_id, target_place_id, new_storage_path, trim(new_caption), trim(new_alt_text), current_user_id, 'published');
   insert into public.submission_limits (visitor_id, action, last_submitted_at)
   values (current_user_id, 'photo', now())
   on conflict (visitor_id, action) do update set last_submitted_at = excluded.last_submitted_at;

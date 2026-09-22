@@ -321,7 +321,7 @@ export default function AdminPage() {
   };
 
   const newReports = dashboard?.reports.filter((report) => report.status === "new") ?? [];
-  const pendingPhotos = dashboard?.photos.filter((photo) => photo.status === "hidden") ?? [];
+  const hiddenPhotos = dashboard?.photos.filter((photo) => photo.status === "hidden") ?? [];
 
   return (
     <>
@@ -594,13 +594,13 @@ export default function AdminPage() {
                   <SectionHeading
                     eyebrow="Фото сообщества"
                     title="Фотографии"
-                    description="Публикуйте только полезные и подходящие снимки мест."
+                    description="Фото публикуются сразу. Скройте или удалите неподходящие снимки."
                     action={
                       <Badge
                         variant="secondary"
                         className="col-start-2 row-span-2 row-start-1 self-start justify-self-end"
                       >
-                        {pendingPhotos.length} на проверке
+                        {hiddenPhotos.length} скрыто
                       </Badge>
                     }
                   />
@@ -634,7 +634,7 @@ export default function AdminPage() {
                                 >
                                   {photo.status === "published"
                                     ? "Опубликовано"
-                                    : "На проверке"}
+                                    : "Скрыто"}
                                 </Badge>
                                 <time className="text-muted-foreground text-xs">
                                   {new Date(photo.created_at).toLocaleDateString("ru")}
