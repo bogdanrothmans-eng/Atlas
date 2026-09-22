@@ -50,7 +50,7 @@ export function CitySwitcher({
       <PopoverTrigger asChild>
         <Button
           variant="ghost"
-          className="gap-1.5 px-2"
+          className="h-8 gap-1.5 px-2"
           aria-label={`Город: ${city.name}, ${city.country}. Выбрать другой`}
         >
           {/*

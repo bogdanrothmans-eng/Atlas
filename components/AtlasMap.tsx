@@ -410,8 +410,10 @@ export default function AtlasMap() {
     const compact = window.innerWidth <= 700;
     map.fitBounds(bounds, {
       padding: compact
-        ? { top: 200, right: 24, bottom: 40, left: 24 }
-        : { top: 140, right: 40, bottom: 40, left: 380 },
+        // Header bottom + the 56px pin, which draws above its coordinate,
+        // + a 12px margin: 120 + 56 + 12 on mobile, 56 + 56 + 12 on desktop.
+        ? { top: 188, right: 24, bottom: 40, left: 24 }
+        : { top: 124, right: 40, bottom: 40, left: 380 },
       maxZoom: 12.5,
       duration: animated ? 420 : 0,
       essential: false,
@@ -746,84 +748,86 @@ export default function AtlasMap() {
       </a>
       <h1 className="sr-only">Atlas — полезные места на Пхукете</h1>
 
-      <main
-        id="map"
-        ref={containerRef}
-        className={cn("absolute inset-0", adding && "cursor-crosshair")}
-        aria-label="Интерактивная карта Пхукета"
-        aria-busy={loadingPlaces}
-        tabIndex={-1}
-      />
+      {/*
+        Three islands, one per question the user is asking: where am I (brand +
+        city), what am I looking for (search + filters), and what do I do / who
+        am I (add place + profile). The map showing through the gaps is what
+        groups them; every island shares one height and one elevation.
 
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-20 p-3">
-        <header className="bg-background pointer-events-auto mx-auto flex max-w-5xl flex-wrap items-center gap-1.5 rounded-2xl border p-2 shadow-sm sm:flex-nowrap sm:gap-2">
+        Radii are concentric: islands are rounded-xl (14px) with a 6px inset,
+        so the rounded-md (8px) controls inside sit parallel to the edge.
+      */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex flex-wrap items-center gap-2 p-3 md:flex-nowrap">
+        <div className="bg-background pointer-events-auto flex h-11 shrink-0 items-center gap-1 rounded-xl border px-1.5 shadow-sm">
           <button
             type="button"
             onClick={resetDiscovery}
             aria-label="Atlas — показать все места"
-            className="focus-visible:ring-ring/50 flex shrink-0 items-center gap-2 rounded-md px-1 font-semibold tracking-tight outline-none focus-visible:ring-[3px]"
+            className="focus-visible:ring-ring/50 flex h-8 items-center gap-2 rounded-md px-1 font-semibold tracking-tight outline-none focus-visible:ring-[3px]"
           >
-            <BrandMark />
+            <BrandMark className="size-7 rounded-md" />
             <span className="hidden lg:inline">Atlas</span>
           </button>
-
           <Separator
             orientation="vertical"
-            className="hidden data-[orientation=vertical]:h-8 sm:block"
+            className="data-[orientation=vertical]:h-5"
           />
+          <CitySwitcher city={city} counts={cityCounts} onSelect={changeCity} />
+        </div>
 
-          <div className="flex-1 sm:flex-none">
-            <CitySwitcher city={city} counts={cityCounts} onSelect={changeCity} />
-          </div>
-
-          <div className="relative order-last w-full min-w-0 sm:order-none sm:w-auto sm:flex-1">
-            <Search
-              className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2"
-              aria-hidden="true"
-            />
-            <Label className="sr-only" htmlFor="place-search">
-              Поиск мест
-            </Label>
-            <Input
-              id="place-search"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={`Поиск в городе ${city.name}`}
-              autoComplete="off"
-              aria-controls="map"
-              className="px-9"
-            />
+        <div className="pointer-events-auto relative order-last w-full md:order-none md:mx-auto md:w-auto md:max-w-xl md:flex-1">
+          <Search
+            className="text-muted-foreground pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2"
+            aria-hidden="true"
+          />
+          <Label className="sr-only" htmlFor="place-search">
+            Поиск мест
+          </Label>
+          <Input
+            id="place-search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={`Поиск в городе ${city.name}`}
+            autoComplete="off"
+            aria-controls="map"
+            className={cn(
+              "bg-background h-11 rounded-xl pl-10 shadow-sm",
+              query ? "pr-20" : "pr-12",
+            )}
+          />
+          <div className="absolute top-1/2 right-1.5 flex -translate-y-1/2 items-center gap-0.5">
             {query && (
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
                 aria-label="Очистить поиск"
-                className="absolute top-1/2 right-0 size-9 -translate-y-1/2"
+                className="size-8"
                 onClick={() => setQuery("")}
               >
                 <X />
               </Button>
             )}
+            <FiltersSheet
+              open={filtersOpen}
+              onOpenChange={setFiltersOpen}
+              filter={filter}
+              counts={categoryCounts}
+              total={cityPlaces.length}
+              visibleCount={visible.length}
+              onChange={setFilter}
+              onReset={() => setFilter("all")}
+            />
           </div>
+        </div>
 
-          <FiltersSheet
-            open={filtersOpen}
-            onOpenChange={setFiltersOpen}
-            filter={filter}
-            counts={categoryCounts}
-            total={cityPlaces.length}
-            visibleCount={visible.length}
-            onChange={setFilter}
-            onReset={() => setFilter("all")}
-          />
-
+        <div className="bg-background pointer-events-auto ml-auto flex h-11 shrink-0 items-center gap-1 rounded-xl border px-1.5 shadow-sm md:ml-0">
           <Button
             ref={addButtonRef}
             type="button"
-            size="icon"
+            size="sm"
             variant={adding ? "secondary" : "default"}
-            className="sm:w-auto sm:px-4"
+            className="w-8 px-0 sm:w-auto sm:px-3"
             aria-label={adding ? "Отменить добавление места" : "Добавить место"}
             aria-pressed={adding}
             onClick={adding ? cancelAdding : beginAdding}
@@ -833,11 +837,11 @@ export default function AtlasMap() {
               <X className={cn("absolute", iconSwap(adding))} />
             </span>
             <span className="hidden sm:inline">
-              {adding ? "Отменить" : "Добавить"}
+              {adding ? "Отменить" : "Добавить место"}
             </span>
           </Button>
 
-          <Button asChild variant="ghost" size="icon" className="shrink-0 rounded-full">
+          <Button asChild variant="ghost" size="icon" className="size-8 rounded-full">
             <Link
               href={user ? "/profile" : `/auth?next=${encodeURIComponent("/profile")}`}
               aria-label={user ? `Открыть профиль: ${userDisplayName(user)}` : "Войти в Atlas"}
@@ -851,12 +855,22 @@ export default function AtlasMap() {
               )}
             </Link>
           </Button>
-        </header>
+        </div>
       </div>
+
+      <main
+        id="map"
+        ref={containerRef}
+        className={cn("absolute inset-0", adding && "cursor-crosshair")}
+        aria-label="Интерактивная карта Пхукета"
+        aria-busy={loadingPlaces}
+        tabIndex={-1}
+      />
+
 
       {!selected && !adding && visible.length > 0 && (
         <Card
-          className="absolute top-24 left-3 z-10 hidden w-72 gap-0 py-4 shadow-lg md:block"
+          className="absolute top-18 left-3 z-10 hidden w-72 gap-0 py-4 shadow-lg md:block"
           aria-labelledby="map-intro-title"
         >
           <CardContent className="space-y-2 px-4">
@@ -881,7 +895,7 @@ export default function AtlasMap() {
 
       {adding && (
         <Card
-          className="absolute top-24 left-1/2 z-10 w-[min(28rem,calc(100%-1.5rem))] -translate-x-1/2 gap-0 py-4 shadow-lg"
+          className="absolute top-32 left-1/2 z-10 w-[min(28rem,calc(100%-1.5rem))] md:top-18 -translate-x-1/2 gap-0 py-4 shadow-lg"
           aria-labelledby="add-instruction-title"
         >
           <CardContent className="flex flex-wrap items-center gap-3 px-4">
@@ -908,7 +922,7 @@ export default function AtlasMap() {
 
       {!loadingPlaces && visible.length === 0 && (
         <Card
-          className="absolute top-24 left-1/2 z-10 w-[min(24rem,calc(100%-1.5rem))] -translate-x-1/2 gap-0 py-6 text-center shadow-lg"
+          className="absolute top-32 left-1/2 z-10 w-[min(24rem,calc(100%-1.5rem))] md:top-18 -translate-x-1/2 gap-0 py-6 text-center shadow-lg"
           aria-labelledby="map-empty-title"
         >
           <CardContent className="space-y-2 px-6">
@@ -954,7 +968,7 @@ export default function AtlasMap() {
 
       {selected && activeCategory && ActiveCategoryIcon && (
         <Card
-          className="absolute inset-x-0 bottom-0 z-30 max-h-[75svh] gap-0 rounded-b-none py-0 shadow-xl md:inset-x-auto md:top-24 md:bottom-3 md:left-3 md:max-h-none md:w-96 md:rounded-xl"
+          className="absolute inset-x-0 bottom-0 z-30 max-h-[75svh] gap-0 rounded-b-none py-0 shadow-xl md:inset-x-auto md:top-18 md:bottom-3 md:left-3 md:max-h-none md:w-96 md:rounded-xl"
           aria-label={`Информация о ${selected.name}`}
         >
           <div className="relative flex items-start gap-3 border-b p-4 pr-12">

@@ -39,10 +39,14 @@ export function FiltersSheet({
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetTrigger asChild>
+        {/*
+          Docked inside the search field: the filter narrows the search, so it
+          belongs to the same group rather than standing on its own.
+        */}
         <Button
-          variant="outline"
+          variant={active ? "secondary" : "ghost"}
           size="icon"
-          className="relative"
+          className="relative size-8"
           aria-label={
             active
               ? `Фильтры, выбрано: ${categories[filter].label}`
@@ -53,7 +57,7 @@ export function FiltersSheet({
           {active && (
             <span
               aria-hidden="true"
-              className="bg-primary absolute -top-1 -right-1 size-2.5 rounded-full"
+              className="bg-primary ring-background absolute top-1 right-1 size-2 rounded-full ring-2"
             />
           )}
         </Button>
