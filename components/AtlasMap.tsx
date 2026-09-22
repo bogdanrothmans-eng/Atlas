@@ -10,7 +10,7 @@ import {
   ChevronRight,
   Flag,
   MapPin,
-  MessageSquare,
+  MoreHorizontal,
   Plus,
   Route,
   Search,
@@ -50,9 +50,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import {
   Select,
@@ -205,6 +211,11 @@ export default function AtlasMap() {
   const markersRef = useRef<Map<string, MarkerEntry>>(new Map());
   const addingRef = useRef(false);
   const addButtonRef = useRef<HTMLButtonElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const [titleHidden, setTitleHidden] = useState(false);
   const hasFitInitialPlacesRef = useRef(false);
   const handledIntentRef = useRef("");
 
@@ -401,6 +412,78 @@ export default function AtlasMap() {
       element.setAttribute("aria-pressed", String(isSelected));
     });
   }, [selected?.id]);
+
+  // Move focus to the panel so keyboard and screen-reader users land on what
+  // they just opened instead of staying on the pin.
+  useEffect(() => {
+    if (selected) headingRef.current?.focus({ preventScroll: true });
+  }, [selected?.id]);
+
+  // Keep the selected pin visible. The panel covers the left of the map on
+  // desktop and its lower part on mobile, so if the pin sits under it (or
+  // under the header), ease it to the centre of the area that is left.
+  useEffect(() => {
+    if (!selected) return;
+    const frame = requestAnimationFrame(() => {
+      const map = mapRef.current;
+      const card = cardRef.current;
+      if (!map || !card) return;
+      const box = map.getContainer().getBoundingClientRect();
+      const panel = card.getBoundingClientRect();
+      const headerBottom = (headerRef.current?.getBoundingClientRect().bottom ?? box.top) - box.top;
+      const PIN_HEIGHT = 56; // the pin draws above its coordinate
+      const MARGIN = 16;
+      const isSheet = panel.width >= box.width - 1;
+      const area = {
+        left: isSheet ? MARGIN : panel.right - box.left + MARGIN,
+        right: box.width - MARGIN,
+        top: headerBottom + PIN_HEIGHT + MARGIN,
+        bottom: isSheet ? panel.top - box.top - MARGIN : box.height - MARGIN,
+      };
+      if (area.right <= area.left || area.bottom <= area.top) return;
+      const point = map.project([selected.lng, selected.lat]);
+      const visible =
+        point.x >= area.left && point.x <= area.right &&
+        point.y >= area.top && point.y <= area.bottom;
+      if (visible) return;
+      map.easeTo({
+        center: [selected.lng, selected.lat],
+        offset: [
+          (area.left + area.right) / 2 - box.width / 2,
+          (area.top + area.bottom) / 2 - box.height / 2,
+        ],
+        duration: 450,
+        // Non-essential, so MapLibre skips it under prefers-reduced-motion.
+        essential: false,
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [selected?.id]);
+
+  // Watch the real heading so the sticky mini header appears only after it
+  // has scrolled out of view.
+  useEffect(() => {
+    setTitleHidden(false);
+    const heading = headingRef.current;
+    const root = scrollerRef.current;
+    if (!selected || !heading || !root) return;
+    // No root margin: without a hero photo the heading already sits inside
+    // the bar's 56px band at rest, so only a heading that has fully left the
+    // top edge counts as hidden.
+    const observer = new IntersectionObserver(
+      ([entry]) => setTitleHidden(!entry.isIntersecting),
+      { root },
+    );
+    observer.observe(heading);
+    return () => observer.disconnect();
+  }, [selected?.id]);
+
+  const closePlace = () => {
+    const id = selected?.id;
+    setSelected(null);
+    // Hand focus back to the pin that opened the panel.
+    if (id) requestAnimationFrame(() => markersRef.current.get(id)?.element.focus());
+  };
 
   const fitPlacesInView = (targets: Place[], animated = false) => {
     const map = mapRef.current;
@@ -757,7 +840,7 @@ export default function AtlasMap() {
         Radii are concentric: islands are rounded-xl (14px) with a 6px inset,
         so the rounded-md (8px) controls inside sit parallel to the edge.
       */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex flex-wrap items-center gap-2 p-3 md:flex-nowrap">
+      <div ref={headerRef} className="pointer-events-none absolute inset-x-0 top-0 z-20 flex flex-wrap items-center gap-2 p-3 md:flex-nowrap">
         <div className="bg-background pointer-events-auto flex h-11 shrink-0 items-center gap-1 rounded-xl border px-1.5 shadow-sm">
           <button
             type="button"
@@ -967,156 +1050,210 @@ export default function AtlasMap() {
       </div>
 
       {selected && activeCategory && ActiveCategoryIcon && (
+        /*
+          Order follows the questions a visitor asks: is this the place (photo,
+          name), what and where is it (category, address), how do I get there
+          and is it any good (route, vote), then the detail (description,
+          author) and the discussion. Rare actions live in the ⋯ menu.
+        */
         <Card
-          className="absolute inset-x-0 bottom-0 z-30 max-h-[75svh] gap-0 rounded-b-none py-0 shadow-xl md:inset-x-auto md:top-18 md:bottom-3 md:left-3 md:max-h-none md:w-96 md:rounded-xl"
-          aria-label={`Информация о ${selected.name}`}
+          ref={cardRef}
+          role="region"
+          aria-labelledby="place-title"
+          onKeyDown={(event) => {
+            if (event.key === "Escape" && !event.defaultPrevented) closePlace();
+          }}
+          className="absolute inset-x-0 bottom-0 z-30 max-h-[70svh] gap-0 overflow-hidden rounded-b-none py-0 shadow-xl md:inset-x-auto md:top-18 md:bottom-auto md:left-3 md:max-h-[calc(100svh-5.25rem)] md:w-96 md:rounded-xl"
         >
-          <div className="relative flex items-start gap-3 border-b p-4 pr-12">
-            <span
-              aria-hidden="true"
-              className="grid size-9 shrink-0 place-items-center rounded-lg text-white"
-              style={{ backgroundColor: activeCategory.color }}
-            >
-              <ActiveCategoryIcon className="size-4" />
-            </span>
-            <div className="min-w-0 flex-1">
-              <span className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-                {activeCategory.label}
-              </span>
-              <h2 className="text-lg leading-tight font-semibold tracking-tight text-balance">
-                {selected.name}
-              </h2>
-            </div>
+          {/* Pinned outside the scroller so close stays reachable while reading. */}
+          <div className="absolute top-3 right-3 z-10 flex gap-1.5">
+            {/*
+              Non-modal: a modal menu aria-hides the rest of the page, which
+              includes the still-focusable skip link. A two-item action menu
+              needs no focus trap; clicking outside already dismisses it.
+            */}
+            <DropdownMenu modal={false}>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="secondary"
+                  size="icon"
+                  className="size-8 rounded-full shadow-sm"
+                  aria-label="Ещё действия с местом"
+                >
+                  <MoreHorizontal />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-52">
+                <DropdownMenuItem
+                  onSelect={() => {
+                    if (requireMember("photo", selected.id)) setPhotoOpen(true);
+                  }}
+                >
+                  <Camera /> Добавить фото
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  variant="destructive"
+                  onSelect={() => {
+                    if (!requireMember("report", selected.id)) return;
+                    setReportReason("inaccurate");
+                    setReportOpen(true);
+                  }}
+                >
+                  <Flag /> Пожаловаться
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button
               type="button"
-              variant="ghost"
+              variant="secondary"
               size="icon"
+              className="size-8 rounded-full shadow-sm"
               aria-label="Закрыть карточку"
-              className="absolute top-3 right-3"
-              onClick={() => setSelected(null)}
+              onClick={closePlace}
             >
               <X />
             </Button>
           </div>
 
-          <ScrollArea className="max-h-[calc(75svh-5rem)] md:max-h-none md:flex-1">
-            <div className="space-y-4 p-4">
-              {selected.photos.length > 0 && (
+          <div
+            ref={scrollerRef}
+            className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+          >
+            {/*
+              Sticky but pulled up by its own height (-mb-14), so it overlays
+              the content instead of pushing it down. aria-hidden because the
+              real heading below is what assistive tech should read.
+            */}
+            <div
+              aria-hidden="true"
+              className={cn(
+                "bg-background sticky top-0 z-[5] -mb-14 flex h-14 items-center border-b px-4 pr-24 transition-opacity duration-150",
+                titleHidden ? "opacity-100" : "pointer-events-none opacity-0",
+              )}
+            >
+              <span className="truncate font-semibold">{selected.name}</span>
+            </div>
+            {selected.photos.length > 0 && (
+              <div className="relative">
                 <div
-                  className="flex gap-2 overflow-x-auto"
-                  aria-label={`Фотографии ${selected.name}`}
+                  className="flex snap-x snap-mandatory overflow-x-auto"
+                  role="region"
+                  aria-label={`Фотографии: ${selected.name}`}
+                  tabIndex={0}
                 >
                   {selected.photos.map((photo) => (
                     <figure
                       key={photo.id}
-                      className="bg-muted image-outline relative aspect-video w-60 shrink-0 overflow-hidden rounded-lg"
+                      className="bg-muted relative aspect-[2/1] w-full shrink-0 snap-start md:aspect-[16/10]"
                     >
                       <Image
                         src={photo.url}
                         alt={photo.alt}
                         fill
-                        sizes="(max-width: 48rem) 100vw, 25rem"
+                        sizes="(max-width: 48rem) 100vw, 24rem"
                         className="object-cover"
                       />
                       {photo.caption && (
-                        <figcaption className="absolute inset-x-0 bottom-0 bg-black/60 px-2 py-1 text-xs text-white">
+                        <figcaption className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent px-3 pt-8 pb-2.5 text-xs text-white">
                           {photo.caption}
                         </figcaption>
                       )}
                     </figure>
                   ))}
                 </div>
-              )}
-
-              <p className="text-muted-foreground flex items-start gap-2 text-sm">
-                <MapPin className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-                {selected.address}
-              </p>
-              <p className="text-sm text-pretty">{selected.description}</p>
-              <p className="text-muted-foreground text-xs">
-                Добавил: {selected.addedBy}
-              </p>
-
-              <Button asChild className="w-full">
-                <a
-                  href={`https://www.openstreetmap.org/directions?to=${selected.lat},${selected.lng}`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  <Route /> Построить маршрут
-                </a>
-              </Button>
-
-              <div className="grid grid-cols-4 gap-2" aria-label="Действия с местом">
-                <Button
-                  type="button"
-                  variant={selected.myReaction === 1 ? "default" : "outline"}
-                  onClick={() => react(1)}
-                  disabled={reacting}
-                  aria-pressed={selected.myReaction === 1}
-                  aria-label={`Нравится, ${selected.likes}`}
-                >
-                  <ThumbsUp />
-                  <span className="tabular-nums">{selected.likes}</span>
-                </Button>
-                <Button
-                  type="button"
-                  variant={selected.myReaction === -1 ? "destructive" : "outline"}
-                  onClick={() => react(-1)}
-                  disabled={reacting}
-                  aria-pressed={selected.myReaction === -1}
-                  aria-label={`Не нравится, ${selected.dislikes}`}
-                >
-                  <ThumbsDown />
-                  <span className="tabular-nums">{selected.dislikes}</span>
-                </Button>
-                <Button asChild variant="outline">
-                  <a
-                    href="#place-comments"
-                    aria-label={`Комментарии, ${selected.comments.length}`}
+                {selected.photos.length > 1 && (
+                  <Badge
+                    variant="secondary"
+                    className="absolute top-3 left-3 tabular-nums shadow-sm"
                   >
-                    <MessageSquare />
-                    <span className="tabular-nums">{selected.comments.length}</span>
+                    {selected.photos.length} фото
+                  </Badge>
+                )}
+              </div>
+            )}
+
+            <div className="space-y-4 p-4">
+              <header
+                className={cn("space-y-2", !selected.photos.length && "pr-20")}
+              >
+                <h2
+                  id="place-title"
+                  ref={headingRef}
+                  tabIndex={-1}
+                  className="text-xl leading-tight font-semibold tracking-tight text-balance outline-none"
+                >
+                  {selected.name}
+                </h2>
+                <Badge variant="secondary" className="gap-1.5">
+                  <ActiveCategoryIcon
+                    style={{ color: activeCategory.color }}
+                    aria-hidden="true"
+                  />
+                  {activeCategory.label}
+                </Badge>
+                <p className="text-muted-foreground flex items-start gap-1.5 text-sm">
+                  <MapPin className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+                  {selected.address}
+                </p>
+              </header>
+
+              <div className="flex gap-2">
+                <Button asChild className="min-w-0 flex-1">
+                  <a
+                    href={`https://www.openstreetmap.org/directions?to=${selected.lat},${selected.lng}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <Route /> Построить маршрут
                   </a>
                 </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  aria-label="Добавить фото"
-                  onClick={() => requireMember("photo", selected.id) && setPhotoOpen(true)}
-                >
-                  <Camera />
-                </Button>
+                {/*
+                  Like and dislike are one decision, so they read as one group.
+                  The active vote fills its icon rather than turning red: a
+                  dislike is an opinion, not an error.
+                */}
+                <div role="group" aria-label="Оценка места" className="flex shrink-0">
+                  <Button
+                    type="button"
+                    variant={selected.myReaction === 1 ? "secondary" : "outline"}
+                    className="rounded-r-none px-3"
+                    onClick={() => react(1)}
+                    disabled={reacting}
+                    aria-pressed={selected.myReaction === 1}
+                    aria-label={`Нравится, ${selected.likes}`}
+                  >
+                    <ThumbsUp className={cn(selected.myReaction === 1 && "fill-current")} />
+                    <span className="tabular-nums">{selected.likes}</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={selected.myReaction === -1 ? "secondary" : "outline"}
+                    className="-ml-px rounded-l-none px-3"
+                    onClick={() => react(-1)}
+                    disabled={reacting}
+                    aria-pressed={selected.myReaction === -1}
+                    aria-label={`Не нравится, ${selected.dislikes}`}
+                  >
+                    <ThumbsDown className={cn(selected.myReaction === -1 && "fill-current")} />
+                    <span className="tabular-nums">{selected.dislikes}</span>
+                  </Button>
+                </div>
               </div>
 
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="text-muted-foreground w-full"
-                onClick={() => {
-                  if (!requireMember("report", selected.id)) return;
-                  setReportReason("inaccurate");
-                  setReportOpen(true);
-                }}
-              >
-                <Flag /> Пожаловаться на место
-              </Button>
+              <p className="text-sm leading-relaxed text-pretty">{selected.description}</p>
+              {/* Label and value, so the line never has to agree with a name's gender. */}
+              <p className="text-muted-foreground text-xs">Автор: {selected.addedBy}</p>
 
               <Separator />
 
               <section className="space-y-4" id="place-comments">
-                <div className="space-y-1">
-                  <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-                    Обсуждение
-                  </p>
-                  <h3 className="font-semibold tracking-tight">
-                    Комментарии{" "}
-                    <span className="text-muted-foreground tabular-nums">
-                      {selected.comments.length}
-                    </span>
-                  </h3>
-                </div>
+                <h3 className="font-semibold tracking-tight">
+                  Комментарии{" "}
+                  <span className="text-muted-foreground tabular-nums">
+                    {selected.comments.length}
+                  </span>
+                </h3>
 
                 {commentThreads.map(({ root, replies }) => (
                   <div className="space-y-3" key={root.id}>
@@ -1130,13 +1267,9 @@ export default function AtlasMap() {
                 ))}
 
                 {!selected.comments.length && (
-                  <div className="text-muted-foreground flex flex-col items-center gap-2 rounded-lg border border-dashed p-6 text-center">
-                    <MessageSquare className="size-5" aria-hidden="true" />
-                    <p className="text-sm text-pretty">
-                      Пока нет комментариев. Расскажите, что важно знать об этом
-                      месте.
-                    </p>
-                  </div>
+                  <p className="text-muted-foreground text-sm text-pretty">
+                    Пока никто не написал. Расскажите, что важно знать об этом месте.
+                  </p>
                 )}
 
                 {user && session ? (
@@ -1217,7 +1350,7 @@ export default function AtlasMap() {
                 )}
               </section>
             </div>
-          </ScrollArea>
+          </div>
         </Card>
       )}
 
