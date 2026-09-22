@@ -8,7 +8,12 @@ export default function App({ Component, pageProps }: AppProps) {
   return (
     <AuthProvider>
       <Component {...pageProps} />
-      <Toaster position="bottom-center" richColors closeButton />
+      {/*
+        No `richColors`: its error palette renders #e60000 on #fff0f0, which is
+        4.34:1 and fails AA. The theme surface keeps toast text high-contrast,
+        and sonner still distinguishes types by icon.
+      */}
+      <Toaster position="bottom-center" closeButton />
     </AuthProvider>
   );
 }

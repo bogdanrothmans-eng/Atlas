@@ -9,8 +9,10 @@ const alertVariants = cva(
     variants: {
       variant: {
         default: "bg-card text-card-foreground",
+        // The description keeps full opacity: at 90% the destructive token
+        // measures 4.49:1 on the card surface, just under the 4.5:1 AA floor.
         destructive:
-          "text-destructive bg-card [&>svg]:text-current *:data-[slot=alert-description]:text-destructive/90",
+          "text-destructive bg-card [&>svg]:text-current *:data-[slot=alert-description]:text-destructive",
       },
     },
     defaultVariants: {
