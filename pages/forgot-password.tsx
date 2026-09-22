@@ -1,7 +1,21 @@
 import Head from "next/head";
 import Link from "next/link";
 import { FormEvent, useState } from "react";
-import { requestPasswordReset } from "../lib/adminRepository";
+import { CircleAlert, MailCheck } from "lucide-react";
+
+import { AccountShell } from "@/components/AccountShell";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { requestPasswordReset } from "@/lib/adminRepository";
 
 export default function ForgotPasswordPage() {
   const [loading, setLoading] = useState(false);
@@ -17,30 +31,85 @@ export default function ForgotPasswordPage() {
       await requestPasswordReset(email, `${window.location.origin}/reset-password`);
       setSent(true);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Не удалось отправить письмо. Проверьте подключение и повторите попытку.");
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Не удалось отправить письмо. Проверьте подключение и повторите попытку.",
+      );
     } finally {
       setLoading(false);
     }
   };
 
-  return <>
-    <Head><title>Восстановление пароля — Atlas</title><meta name="robots" content="noindex,nofollow" /></Head>
-    <div className="admin-shell">
-      <header className="admin-header"><Link href="/" className="brand"><span className="brand-mark">A</span><span>Atlas</span></Link><span className="admin-badge">Аккаунт Atlas</span></header>
-      <main className="login-wrap"><section className="login-card">
-        <p className="eyebrow">Восстановление доступа</p>
-        <h1>Сбросить пароль</h1>
-        {sent ? <div className="recovery-result" role="status"><p className="form-success">Если аккаунт существует, письмо со ссылкой уже отправлено. Проверьте входящие и папку «Спам».</p><Link href="/auth">Вернуться ко входу</Link></div> : <>
-          <p>Укажите email аккаунта. Мы отправим ссылку для создания нового пароля.</p>
-          <form onSubmit={submit}>
-            <label htmlFor="recovery-email">Email</label>
-            <input id="recovery-email" name="email" type="email" autoComplete="email" spellCheck={false} placeholder="name@example.com" required autoFocus />
-            <button className="primary" type="submit" disabled={loading}>{loading ? "Отправляем…" : "Отправить ссылку"}</button>
-          </form>
-          <Link className="login-help-link" href="/auth">Вернуться ко входу</Link>
-          {error && <p className="form-error" role="alert">{error}</p>}
-        </>}
-      </section></main>
-    </div>
-  </>;
+  return (
+    <>
+      <Head>
+        <title>Восстановление пароля — Atlas</title>
+        <meta name="robots" content="noindex,nofollow" />
+      </Head>
+      <AccountShell badge="Аккаунт Atlas">
+        <Card className="w-full max-w-md">
+          <CardHeader>
+            <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+              Восстановление доступа
+            </p>
+            <CardTitle className="text-2xl tracking-tight">
+              Сбросить пароль
+            </CardTitle>
+            <CardDescription>
+              {sent
+                ? "Письмо отправлено."
+                : "Укажите email аккаунта. Мы отправим ссылку для создания нового пароля."}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {sent ? (
+              <div className="space-y-4" role="status">
+                <Alert>
+                  <MailCheck />
+                  <AlertDescription>
+                    Если аккаунт существует, письмо со ссылкой уже отправлено.
+                    Проверьте входящие и папку «Спам».
+                  </AlertDescription>
+                </Alert>
+                <Button asChild variant="outline" className="w-full">
+                  <Link href="/auth">Вернуться ко входу</Link>
+                </Button>
+              </div>
+            ) : (
+              <>
+                <form className="space-y-4" onSubmit={submit}>
+                  <div className="space-y-2">
+                    <Label htmlFor="recovery-email">Email</Label>
+                    <Input
+                      id="recovery-email"
+                      name="email"
+                      type="email"
+                      autoComplete="email"
+                      spellCheck={false}
+                      placeholder="name@example.com"
+                      required
+                      autoFocus
+                    />
+                  </div>
+                  <Button type="submit" className="w-full" disabled={loading}>
+                    {loading ? "Отправляем…" : "Отправить ссылку"}
+                  </Button>
+                </form>
+                {error && (
+                  <Alert variant="destructive">
+                    <CircleAlert />
+                    <AlertDescription>{error}</AlertDescription>
+                  </Alert>
+                )}
+                <Button asChild variant="link" className="w-full">
+                  <Link href="/auth">Вернуться ко входу</Link>
+                </Button>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </AccountShell>
+    </>
+  );
 }

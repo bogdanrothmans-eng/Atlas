@@ -4,6 +4,30 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import type { Map as MapLibreMap, Marker, StyleSpecification } from "maplibre-gl";
+import { toast } from "sonner";
+import {
+  Briefcase,
+  Camera,
+  ChevronRight,
+  FileText,
+  Flag,
+  HeartPulse,
+  MapPin,
+  MessageSquare,
+  Plus,
+  Route,
+  Search,
+  Send,
+  Sparkles,
+  ThumbsDown,
+  ThumbsUp,
+  User,
+  Users,
+  UtensilsCrossed,
+  X,
+  type LucideIcon,
+} from "lucide-react";
+
 import {
   createComment,
   createPlace,
@@ -16,20 +40,47 @@ import {
   type Comment,
   type Place,
   type ReportReason,
-} from "../lib/atlasRepository";
-import { Icon, type IconName } from "./Icons";
-import { Modal } from "./Modal";
-import { useAuth, userDisplayName } from "./AuthProvider";
+} from "@/lib/atlasRepository";
+import { useAuth, userDisplayName } from "@/components/AuthProvider";
+import { BrandMark } from "@/components/Brand";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 
 type MarkerEntry = { marker: Marker; element: HTMLButtonElement; place: Place };
 
-const categories: Record<Category, { label: string; icon: IconName; color: string }> = {
-  documents: { label: "Документы", icon: "documents", color: "#6f4bd8" },
-  health: { label: "Медицина", icon: "health", color: "#c83f52" },
-  food: { label: "Еда", icon: "food", color: "#a94f18" },
-  work: { label: "Работа", icon: "work", color: "#24739e" },
-  family: { label: "Для семьи", icon: "family", color: "#bd3f7f" },
-  leisure: { label: "Досуг", icon: "leisure", color: "#2f8258" },
+const categories: Record<
+  Category,
+  { label: string; icon: LucideIcon; color: string }
+> = {
+  documents: { label: "Документы", icon: FileText, color: "#6f4bd8" },
+  health: { label: "Медицина", icon: HeartPulse, color: "#c83f52" },
+  food: { label: "Еда", icon: UtensilsCrossed, color: "#a94f18" },
+  work: { label: "Работа", icon: Briefcase, color: "#24739e" },
+  family: { label: "Для семьи", icon: Users, color: "#bd3f7f" },
+  leisure: { label: "Досуг", icon: Sparkles, color: "#2f8258" },
 };
 
 const seedPlaces: Place[] = [
@@ -161,7 +212,8 @@ export default function AtlasMap() {
   const [query, setQuery] = useState("");
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState<{ lng: number; lat: number } | null>(null);
-  const [notice, setNotice] = useState("");
+  const [draftCategory, setDraftCategory] = useState<Category>("documents");
+  const [reportReason, setReportReason] = useState<ReportReason>("inaccurate");
   const [loadingPlaces, setLoadingPlaces] = useState(isSupabaseConfigured);
   const [savingPlace, setSavingPlace] = useState(false);
   const [savingComment, setSavingComment] = useState(false);
@@ -193,7 +245,7 @@ export default function AtlasMap() {
         .then((data) => {
           if (data.length) setPlaces(data);
         })
-        .catch(() => setNotice("Не удалось обновить данные. Показали сохранённую подборку."))
+        .catch(() => toast.error("Не удалось обновить данные. Показали сохранённую подборку."))
         .finally(() => setLoadingPlaces(false));
     } else {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -212,12 +264,19 @@ export default function AtlasMap() {
     setReplyTo(null);
   }, [selected?.id]);
 
+  // The draft opens from a map click handler that cannot read the latest
+  // filter, so the suggested category is applied once the draft appears.
+  useEffect(() => {
+    if (draft) setDraftCategory(filter === "all" ? "documents" : filter);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft]);
+
   useEffect(() => {
     if (!adding) return;
     const cancel = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setAdding(false);
-        setNotice("Добавление отменено");
+        toast("Добавление отменено");
         addButtonRef.current?.focus();
       }
     };
@@ -351,12 +410,11 @@ export default function AtlasMap() {
     if (!requireMember("add-place")) return;
     setAdding(true);
     setSelected(null);
-    setNotice("");
   };
 
   const cancelAdding = () => {
     setAdding(false);
-    setNotice("Добавление отменено");
+    toast("Добавление отменено");
     addButtonRef.current?.focus();
   };
 
@@ -385,15 +443,15 @@ export default function AtlasMap() {
     if (String(data.get("website") || "").trim()) return;
     const placeWait = getActionWait("place", PLACE_SUBMISSION_INTERVAL, user.id);
     if (isSupabaseConfigured && placeWait > 0) {
-      setNotice(`Новое место можно отправить через ${Math.ceil(placeWait / 60000)} мин.`);
+      toast(`Новое место можно отправить через ${Math.ceil(placeWait / 60000)} мин.`);
       return;
     }
-    let place: Place = {
+    const place: Place = {
       id: crypto.randomUUID(),
       name: String(data.get("name")).trim(),
       address: String(data.get("address")).trim(),
       description: String(data.get("description")).trim(),
-      category: data.get("category") as Category,
+      category: draftCategory,
       ...draft,
       likes: 0,
       dislikes: 0,
@@ -412,9 +470,9 @@ export default function AtlasMap() {
         setSelected(place);
       }
       setDraft(null);
-      setNotice(isSupabaseConfigured ? "Место отправлено на модерацию" : "Место сохранено в этом браузере");
+      toast.success(isSupabaseConfigured ? "Место отправлено на модерацию" : "Место сохранено в этом браузере");
     } catch {
-      setNotice("Не удалось добавить место. Проверьте соединение и повторите попытку.");
+      toast.error("Не удалось добавить место. Проверьте соединение и повторите попытку.");
     } finally {
       setSavingPlace(false);
     }
@@ -427,11 +485,12 @@ export default function AtlasMap() {
       return;
     }
     if (!selected || savingComment) return;
-    const data = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const data = new FormData(form);
     if (String(data.get("website") || "").trim()) return;
     const commentWait = getActionWait("comment", COMMENT_SUBMISSION_INTERVAL, user.id);
     if (isSupabaseConfigured && commentWait > 0) {
-      setNotice(`Следующий комментарий можно отправить через ${Math.ceil(commentWait / 1000)} сек.`);
+      toast(`Следующий комментарий можно отправить через ${Math.ceil(commentWait / 1000)} сек.`);
       return;
     }
     const text = String(data.get("comment")).trim();
@@ -447,10 +506,10 @@ export default function AtlasMap() {
       setPlaces((current) => current.map((place) => place.id === updated.id ? updated : place));
       setSelected(updated);
       setReplyTo(null);
-      event.currentTarget.reset();
-      setNotice(replyTo ? "Ответ опубликован" : "Комментарий опубликован");
+      form.reset();
+      toast.success(replyTo ? "Ответ опубликован" : "Комментарий опубликован");
     } catch {
-      setNotice("Не удалось опубликовать комментарий. Повторите попытку.");
+      toast.error("Не удалось опубликовать комментарий. Повторите попытку.");
     } finally {
       setSavingComment(false);
     }
@@ -475,7 +534,7 @@ export default function AtlasMap() {
       setPlaces((current) => current.map((place) => place.id === updated.id ? updated : place));
       setSelected(updated);
     } catch (cause) {
-      setNotice(cause instanceof Error ? cause.message : "Не удалось сохранить реакцию");
+      toast.error(cause instanceof Error ? cause.message : "Не удалось сохранить реакцию");
     } finally {
       setReacting(false);
     }
@@ -493,16 +552,16 @@ export default function AtlasMap() {
     const file = data.get("photo");
     if (!(file instanceof File) || !file.size) return;
     if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
-      setNotice("Подойдут JPG, PNG или WebP");
+      toast.error("Подойдут JPG, PNG или WebP");
       return;
     }
     if (file.size > 5 * 1024 * 1024) {
-      setNotice("Фото должно быть меньше 5 МБ");
+      toast.error("Фото должно быть меньше 5 МБ");
       return;
     }
     const photoWait = getActionWait("photo", PHOTO_SUBMISSION_INTERVAL, user.id);
     if (photoWait > 0) {
-      setNotice(`Следующее фото можно отправить через ${Math.ceil(photoWait / 1000)} сек.`);
+      toast(`Следующее фото можно отправить через ${Math.ceil(photoWait / 1000)} сек.`);
       return;
     }
     setSavingPhoto(true);
@@ -511,9 +570,9 @@ export default function AtlasMap() {
       rememberAction("photo", user.id);
       form.reset();
       setPhotoOpen(false);
-      setNotice("Фото отправлено на модерацию");
+      toast.success("Фото отправлено на модерацию");
     } catch (cause) {
-      setNotice(cause instanceof Error ? cause.message : "Не удалось загрузить фото");
+      toast.error(cause instanceof Error ? cause.message : "Не удалось загрузить фото");
     } finally {
       setSavingPhoto(false);
     }
@@ -529,11 +588,11 @@ export default function AtlasMap() {
     const data = new FormData(event.currentTarget);
     setSavingReport(true);
     try {
-      await reportPlace(selected.id, data.get("reason") as ReportReason, String(data.get("details") || "").trim(), user.id, session.access_token);
+      await reportPlace(selected.id, reportReason, String(data.get("details") || "").trim(), user.id, session.access_token);
       setReportOpen(false);
-      setNotice("Жалоба отправлена. Спасибо, что помогаете Atlas.");
+      toast.success("Жалоба отправлена. Спасибо, что помогаете Atlas.");
     } catch (cause) {
-      setNotice(cause instanceof Error ? cause.message : "Не удалось отправить жалобу");
+      toast.error(cause instanceof Error ? cause.message : "Не удалось отправить жалобу");
     } finally {
       setSavingReport(false);
     }
@@ -563,10 +622,11 @@ export default function AtlasMap() {
     if (intent === "add-place") {
       setSelected(null);
       setAdding(true);
-      setNotice("Вы вошли. Теперь выберите место на карте.");
+      toast("Вы вошли. Теперь выберите место на карте.");
     } else if (target && intent === "photo") {
       setPhotoOpen(true);
     } else if (target && intent === "report") {
+      setReportReason("inaccurate");
       setReportOpen(true);
     } else if (target && intent === "comment") {
       requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>("#comment")?.focus());
@@ -579,7 +639,7 @@ export default function AtlasMap() {
           setPlaces((current) => current.map((place) => place.id === target.id ? updated : place));
           setSelected(updated);
         })
-        .catch((cause) => setNotice(cause instanceof Error ? cause.message : "Не удалось сохранить реакцию"))
+        .catch((cause) => toast.error(cause instanceof Error ? cause.message : "Не удалось сохранить реакцию"))
         .finally(() => setReacting(false));
     }
 
@@ -603,299 +663,744 @@ export default function AtlasMap() {
   }, [selected]);
 
   const activeCategory = selected ? categories[selected.category] : null;
+  const ActiveCategoryIcon = activeCategory?.icon;
   const hasFilters = Boolean(query.trim()) || filter !== "all";
 
+  const renderComment = (comment: Comment, isReply = false) => (
+    <article className="flex items-start gap-3" key={comment.id}>
+      <Avatar className={cn("size-8", isReply && "size-7")}>
+        <AvatarFallback className={cn(isReply && "text-xs")}>
+          {comment.author.slice(0, 1).toUpperCase()}
+        </AvatarFallback>
+      </Avatar>
+      <div className="min-w-0 flex-1 space-y-1">
+        <header className="flex items-baseline gap-2">
+          <strong className="truncate text-sm font-medium">{comment.author}</strong>
+          <time className="text-muted-foreground text-xs" dateTime={comment.createdAt}>
+            {comment.date}
+          </time>
+        </header>
+        <p className="text-sm text-pretty">{comment.text}</p>
+        <Button
+          variant="link"
+          size="sm"
+          className="h-auto p-0 text-xs"
+          onClick={() => startReply(comment)}
+        >
+          Ответить
+        </Button>
+      </div>
+    </article>
+  );
+
   return (
-    <div className={`atlas${adding ? " is-adding" : ""}`}>
-      <a className="skip-link" href="#map">Перейти к карте</a>
+    <div className="bg-muted relative h-svh w-full overflow-hidden">
+      <a
+        href="#map"
+        className="bg-background focus:ring-ring sr-only focus:not-sr-only focus:absolute focus:top-3 focus:left-3 focus:z-50 focus:rounded-md focus:border focus:px-3 focus:py-2 focus:text-sm focus:ring-2"
+      >
+        Перейти к карте
+      </a>
       <h1 className="sr-only">Atlas — полезные места на Пхукете</h1>
 
-      <header className="topbar">
-        <button className="brand" type="button" onClick={resetDiscovery} aria-label="Atlas — показать все места">
-          <span className="brand-mark" aria-hidden="true">A</span>
-          <span className="brand-name">Atlas</span>
-        </button>
-        <div className="city" aria-label="Текущий город: Пхукет, Таиланд">
-          <span>Пхукет</span>
-          <small>Таиланд</small>
-        </div>
-        <div className="search">
-          <Icon name="search" />
-          <label className="sr-only" htmlFor="place-search">Поиск мест</label>
-          <input
-            id="place-search"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Название, адрес или описание"
-            autoComplete="off"
-            aria-controls="map"
-          />
-          {query && (
-            <button type="button" className="search-clear" aria-label="Очистить поиск" onClick={() => setQuery("")}>
-              <Icon name="close" />
-            </button>
-          )}
-        </div>
-        <button
-          ref={addButtonRef}
-          className="primary add-place-button"
-          type="button"
-          aria-label={adding ? "Отменить добавление места" : "Добавить место"}
-          aria-pressed={adding}
-          onClick={adding ? cancelAdding : beginAdding}
-        >
-          <Icon name={adding ? "close" : "plus"} />
-          <span>{adding ? "Отменить" : "Добавить место"}</span>
-        </button>
-        <Link className="profile-link" href={user ? "/profile" : `/auth?next=${encodeURIComponent("/profile")}`} aria-label={user ? `Открыть профиль: ${userDisplayName(user)}` : "Войти в Atlas"}>
-          {user ? <span className="profile-initial" aria-hidden="true">{userDisplayName(user).slice(0, 1).toUpperCase()}</span> : <Icon name="user" />}
-        </Link>
-      </header>
+      <main
+        id="map"
+        ref={containerRef}
+        className={cn("absolute inset-0", adding && "cursor-crosshair")}
+        aria-label="Интерактивная карта Пхукета"
+        aria-busy={loadingPlaces}
+        tabIndex={-1}
+      />
 
-      <div className="filters-wrap">
-        <nav className="filters" aria-label="Категории">
-          <button aria-pressed={filter === "all"} onClick={() => setFilter("all")}>
-            Все места <span>{places.length}</span>
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-20 space-y-2 p-3">
+        <header className="bg-background pointer-events-auto mx-auto flex max-w-5xl flex-wrap items-center gap-2 rounded-xl border p-2 shadow-sm">
+          <button
+            type="button"
+            onClick={resetDiscovery}
+            aria-label="Atlas — показать все места"
+            className="focus-visible:ring-ring/50 flex items-center gap-2 rounded-md px-1 font-semibold tracking-tight outline-none focus-visible:ring-[3px]"
+          >
+            <BrandMark />
+            <span className="hidden sm:inline">Atlas</span>
           </button>
-          {(Object.keys(categories) as Category[]).map((key) => (
-            <button key={key} aria-pressed={filter === key} onClick={() => setFilter(key)}>
-              <i style={{ "--category": categories[key].color } as React.CSSProperties} aria-hidden="true">
-                <Icon name={categories[key].icon} />
-              </i>
-              {categories[key].label}
-              <span className="chip-count">{categoryCounts[key]}</span>
-            </button>
-          ))}
+
+          <div
+            className="hidden flex-col leading-tight md:flex"
+            aria-label="Текущий город: Пхукет, Таиланд"
+          >
+            <span className="text-sm font-medium">Пхукет</span>
+            <small className="text-muted-foreground text-xs">Таиланд</small>
+          </div>
+
+          <div className="relative min-w-40 flex-1">
+            <Search
+              className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2"
+              aria-hidden="true"
+            />
+            <Label className="sr-only" htmlFor="place-search">
+              Поиск мест
+            </Label>
+            <Input
+              id="place-search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Название, адрес или описание"
+              autoComplete="off"
+              aria-controls="map"
+              className="px-9"
+            />
+            {query && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label="Очистить поиск"
+                className="absolute top-1/2 right-0 size-9 -translate-y-1/2"
+                onClick={() => setQuery("")}
+              >
+                <X />
+              </Button>
+            )}
+          </div>
+
+          <Button
+            ref={addButtonRef}
+            type="button"
+            variant={adding ? "secondary" : "default"}
+            aria-label={adding ? "Отменить добавление места" : "Добавить место"}
+            aria-pressed={adding}
+            onClick={adding ? cancelAdding : beginAdding}
+          >
+            {adding ? <X /> : <Plus />}
+            <span className="hidden sm:inline">
+              {adding ? "Отменить" : "Добавить место"}
+            </span>
+          </Button>
+
+          <Button asChild variant="ghost" size="icon" className="rounded-full">
+            <Link
+              href={user ? "/profile" : `/auth?next=${encodeURIComponent("/profile")}`}
+              aria-label={user ? `Открыть профиль: ${userDisplayName(user)}` : "Войти в Atlas"}
+            >
+              {user ? (
+                <span aria-hidden="true" className="text-sm font-medium">
+                  {userDisplayName(user).slice(0, 1).toUpperCase()}
+                </span>
+              ) : (
+                <User />
+              )}
+            </Link>
+          </Button>
+        </header>
+
+        <nav
+          className="pointer-events-auto mx-auto flex max-w-5xl gap-2 overflow-x-auto pb-1"
+          aria-label="Категории"
+        >
+          <Button
+            type="button"
+            size="sm"
+            variant={filter === "all" ? "default" : "outline"}
+            className="shrink-0 rounded-full shadow-sm"
+            aria-pressed={filter === "all"}
+            onClick={() => setFilter("all")}
+          >
+            Все места
+            <Badge variant="secondary" className="tabular-nums">
+              {places.length}
+            </Badge>
+          </Button>
+          {(Object.keys(categories) as Category[]).map((key) => {
+            const { label, icon: CategoryIcon, color } = categories[key];
+            return (
+              <Button
+                key={key}
+                type="button"
+                size="sm"
+                variant={filter === key ? "default" : "outline"}
+                className="shrink-0 rounded-full shadow-sm"
+                aria-pressed={filter === key}
+                onClick={() => setFilter(key)}
+              >
+                <CategoryIcon
+                  style={{ color: filter === key ? undefined : color }}
+                  aria-hidden="true"
+                />
+                {label}
+                <Badge variant="secondary" className="tabular-nums">
+                  {categoryCounts[key]}
+                </Badge>
+              </Button>
+            );
+          })}
         </nav>
       </div>
 
-      <main id="map" ref={containerRef} className="map" aria-label="Интерактивная карта Пхукета" aria-busy={loadingPlaces} tabIndex={-1} />
-
       {!selected && !adding && visible.length > 0 && (
-        <section className="map-intro" aria-labelledby="map-intro-title">
-          <p className="eyebrow">Карта сообщества</p>
-          <h2 id="map-intro-title">Найдите полезное место рядом</h2>
-          <p>Выберите метку, чтобы увидеть детали, отзывы и маршрут.</p>
-          <div className="map-intro-meta"><span>{loadingPlaces ? "Обновляем…" : `${visible.length} мест`}</span><span>Пхукет</span></div>
-        </section>
+        <Card
+          className="absolute top-36 left-3 z-10 hidden w-72 gap-0 py-4 shadow-lg md:block"
+          aria-labelledby="map-intro-title"
+        >
+          <CardContent className="space-y-2 px-4">
+            <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+              Карта сообщества
+            </p>
+            <h2 id="map-intro-title" className="text-lg font-semibold tracking-tight text-balance">
+              Найдите полезное место рядом
+            </h2>
+            <p className="text-muted-foreground text-sm text-pretty">
+              Выберите метку, чтобы увидеть детали, отзывы и маршрут.
+            </p>
+            <div className="flex gap-2 pt-1">
+              <Badge variant="secondary">
+                {loadingPlaces ? "Обновляем…" : `${visible.length} мест`}
+              </Badge>
+              <Badge variant="secondary">Пхукет</Badge>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {adding && (
-        <section className="add-instruction" aria-labelledby="add-instruction-title">
-          <div className="instruction-icon" aria-hidden="true"><Icon name="location" /></div>
-          <div>
-            <h2 id="add-instruction-title">Где находится место?</h2>
-            <p>Выберите точку на карте или используйте её центр.</p>
-          </div>
-          <div className="instruction-actions">
-            <button type="button" onClick={useMapCenter}>Использовать центр карты</button>
-            <button type="button" onClick={cancelAdding}>Отменить</button>
-          </div>
-        </section>
+        <Card
+          className="absolute top-36 left-1/2 z-10 w-[min(28rem,calc(100%-1.5rem))] -translate-x-1/2 gap-0 py-4 shadow-lg"
+          aria-labelledby="add-instruction-title"
+        >
+          <CardContent className="flex flex-wrap items-center gap-3 px-4">
+            <MapPin className="text-muted-foreground size-5 shrink-0" aria-hidden="true" />
+            <div className="min-w-40 flex-1">
+              <h2 id="add-instruction-title" className="font-semibold tracking-tight">
+                Где находится место?
+              </h2>
+              <p className="text-muted-foreground text-sm">
+                Выберите точку на карте или используйте её центр.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" variant="secondary" onClick={useMapCenter}>
+                Центр карты
+              </Button>
+              <Button size="sm" variant="ghost" onClick={cancelAdding}>
+                Отменить
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {!loadingPlaces && visible.length === 0 && (
-        <section className="map-empty" aria-labelledby="map-empty-title">
-          <div className="empty-icon" aria-hidden="true"><Icon name="search" /></div>
-          <h2 id="map-empty-title">Места не найдены</h2>
-          <p>Попробуйте другой запрос или сбросьте выбранную категорию.</p>
-          <button type="button" onClick={resetDiscovery}>Показать все места</button>
-        </section>
+        <Card
+          className="absolute top-36 left-1/2 z-10 w-[min(24rem,calc(100%-1.5rem))] -translate-x-1/2 gap-0 py-6 text-center shadow-lg"
+          aria-labelledby="map-empty-title"
+        >
+          <CardContent className="space-y-2 px-6">
+            <Search className="text-muted-foreground mx-auto size-5" aria-hidden="true" />
+            <h2 id="map-empty-title" className="text-lg font-semibold tracking-tight">
+              Места не найдены
+            </h2>
+            <p className="text-muted-foreground text-sm text-pretty">
+              Попробуйте другой запрос или сбросьте выбранную категорию.
+            </p>
+            <Button variant="secondary" size="sm" onClick={resetDiscovery}>
+              Показать все места
+            </Button>
+          </CardContent>
+        </Card>
       )}
 
-      <div className="result-count" role="status" aria-live="polite">
-        {loadingPlaces ? "Обновляем места" : hasFilters ? `Найдено: ${visible.length}` : `${visible.length} мест на карте`}
+      <div className="sr-only" role="status" aria-live="polite">
+        {loadingPlaces
+          ? "Обновляем места"
+          : hasFilters
+            ? `Найдено: ${visible.length}`
+            : `${visible.length} мест на карте`}
       </div>
 
-      <div className={`toast${notice ? " is-visible" : ""}`} role="status" aria-live="polite" aria-atomic="true">
-        <span>{notice}</span>
-        {notice && (
-          <button type="button" aria-label="Закрыть уведомление" onClick={() => setNotice("")}>
-            <Icon name="close" />
-          </button>
-        )}
-      </div>
-
-      {selected && activeCategory && (
-        <aside className="place-card" aria-label={`Информация о ${selected.name}`} style={{ "--category": activeCategory.color } as React.CSSProperties}>
-          <div className="sheet-handle" aria-hidden="true" />
-          <button className="close" type="button" aria-label="Закрыть карточку" onClick={() => setSelected(null)}>
-            <Icon name="close" />
-          </button>
-          <header className="place-heading">
-            <div className="category-icon" aria-hidden="true"><Icon name={activeCategory.icon} /></div>
-            <div>
-              <span className="category-label">{activeCategory.label}</span>
-              <h2>{selected.name}</h2>
+      {selected && activeCategory && ActiveCategoryIcon && (
+        <Card
+          className="absolute inset-x-0 bottom-0 z-30 max-h-[75svh] gap-0 rounded-b-none py-0 shadow-xl md:inset-x-auto md:top-36 md:bottom-3 md:left-3 md:max-h-none md:w-96 md:rounded-xl"
+          aria-label={`Информация о ${selected.name}`}
+        >
+          <div className="relative flex items-start gap-3 border-b p-4 pr-12">
+            <span
+              aria-hidden="true"
+              className="grid size-9 shrink-0 place-items-center rounded-lg text-white"
+              style={{ backgroundColor: activeCategory.color }}
+            >
+              <ActiveCategoryIcon className="size-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <span className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+                {activeCategory.label}
+              </span>
+              <h2 className="text-lg leading-tight font-semibold tracking-tight text-balance">
+                {selected.name}
+              </h2>
             </div>
-          </header>
-          <div className="place-body">
-            {selected.photos.length > 0 && (
-              <div className="place-gallery" aria-label={`Фотографии ${selected.name}`}>
-                {selected.photos.map((photo) => (
-                  <figure key={photo.id}>
-                    <Image src={photo.url} alt={photo.alt} fill sizes="(max-width: 48rem) 100vw, 25rem" />
-                    {photo.caption && <figcaption>{photo.caption}</figcaption>}
-                  </figure>
-                ))}
-              </div>
-            )}
-            <p className="address"><Icon name="location" /> {selected.address}</p>
-            <p className="description">{selected.description}</p>
-            <p className="byline">Добавил: {selected.addedBy}</p>
-
-            <a className="primary-route" href={`https://www.openstreetmap.org/directions?to=${selected.lat},${selected.lng}`} target="_blank" rel="noreferrer">
-              <Icon name="route" /> Построить маршрут
-            </a>
-
-            <div className="social-actions" aria-label="Действия с местом">
-              <button className={selected.myReaction === 1 ? "is-active" : ""} type="button" onClick={() => react(1)} disabled={reacting} aria-pressed={selected.myReaction === 1} aria-label={`Нравится, ${selected.likes}`}>
-                <Icon name="thumb-up" /><span>{selected.likes}</span>
-              </button>
-              <button className={selected.myReaction === -1 ? "is-negative" : ""} type="button" onClick={() => react(-1)} disabled={reacting} aria-pressed={selected.myReaction === -1} aria-label={`Не нравится, ${selected.dislikes}`}>
-                <Icon name="thumb-down" /><span>{selected.dislikes}</span>
-              </button>
-              <a href="#place-comments" aria-label={`Комментарии, ${selected.comments.length}`}>
-                <Icon name="message" /><span>{selected.comments.length}</span>
-              </a>
-              <button type="button" onClick={() => requireMember("photo", selected.id) && setPhotoOpen(true)} aria-label="Добавить фото">
-                <Icon name="camera" /><span className="action-label">Фото</span>
-              </button>
-            </div>
-            <button className="report-action" type="button" onClick={() => requireMember("report", selected.id) && setReportOpen(true)}><Icon name="flag" /> Пожаловаться на место</button>
-
-            <section className="comments" id="place-comments">
-              <div className="comments-heading">
-                <div><p className="eyebrow">Обсуждение</p><h3>Комментарии <span>{selected.comments.length}</span></h3></div>
-              </div>
-              {commentThreads.map(({ root, replies }) => (
-                <div className="comment-thread" key={root.id}>
-                  <article className="comment-item">
-                    <div className="comment-avatar" aria-hidden="true">{root.author.slice(0, 1).toUpperCase()}</div>
-                    <div className="comment-content">
-                      <header><strong>{root.author}</strong><time dateTime={root.createdAt}>{root.date}</time></header>
-                      <p>{root.text}</p>
-                      <button type="button" onClick={() => startReply(root)}>Ответить</button>
-                    </div>
-                  </article>
-                  {replies.length > 0 && (
-                    <div className="comment-replies">
-                      {replies.map((reply) => (
-                        <article className="comment-item" key={reply.id}>
-                          <div className="comment-avatar is-reply" aria-hidden="true">{reply.author.slice(0, 1).toUpperCase()}</div>
-                          <div className="comment-content">
-                            <header><strong>{reply.author}</strong><time dateTime={reply.createdAt}>{reply.date}</time></header>
-                            <p>{reply.text}</p>
-                            <button type="button" onClick={() => startReply(reply)}>Ответить</button>
-                          </div>
-                        </article>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-              {!selected.comments.length && (
-                <div className="comments-empty">
-                  <Icon name="message" aria-hidden="true" />
-                  <p>Пока нет комментариев. Расскажите, что важно знать об этом месте.</p>
-                </div>
-              )}
-              {user && session ? (
-                <form onSubmit={addComment}>
-                  <input className="honeypot" name="website" type="text" tabIndex={-1} autoComplete="off" aria-hidden="true" />
-                  {replyTo && <div className="replying-to"><span>Ответ для <strong>{replyTo.author}</strong></span><button type="button" aria-label="Отменить ответ" onClick={() => setReplyTo(null)}><Icon name="close" /></button></div>}
-                  <label className="sr-only" htmlFor="comment">Ваш комментарий</label>
-                  <div className="comment-composer">
-                    <textarea id="comment" name="comment" maxLength={1000} required placeholder={replyTo ? `Ответить ${replyTo.author}…` : "Добавить комментарий…"} />
-                    <button type="submit" disabled={savingComment} aria-label={savingComment ? "Публикуем комментарий" : "Опубликовать комментарий"}><Icon name="send" /></button>
-                  </div>
-                </form>
-              ) : (
-                <button className="guest-composer" type="button" onClick={() => sendGuestToAuth("comment", selected.id)}>
-                  <span className="guest-composer-icon" aria-hidden="true"><Icon name="user" /></span>
-                  <span><strong>Войдите, чтобы комментировать</strong><small>Ответы и обсуждения доступны участникам Atlas</small></span>
-                  <Icon name="chevron-right" />
-                </button>
-              )}
-            </section>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label="Закрыть карточку"
+              className="absolute top-3 right-3"
+              onClick={() => setSelected(null)}
+            >
+              <X />
+            </Button>
           </div>
-        </aside>
+
+          <ScrollArea className="max-h-[calc(75svh-5rem)] md:max-h-none md:flex-1">
+            <div className="space-y-4 p-4">
+              {selected.photos.length > 0 && (
+                <div
+                  className="flex gap-2 overflow-x-auto"
+                  aria-label={`Фотографии ${selected.name}`}
+                >
+                  {selected.photos.map((photo) => (
+                    <figure
+                      key={photo.id}
+                      className="bg-muted relative aspect-video w-60 shrink-0 overflow-hidden rounded-lg border"
+                    >
+                      <Image
+                        src={photo.url}
+                        alt={photo.alt}
+                        fill
+                        sizes="(max-width: 48rem) 100vw, 25rem"
+                        className="object-cover"
+                      />
+                      {photo.caption && (
+                        <figcaption className="absolute inset-x-0 bottom-0 bg-black/60 px-2 py-1 text-xs text-white">
+                          {photo.caption}
+                        </figcaption>
+                      )}
+                    </figure>
+                  ))}
+                </div>
+              )}
+
+              <p className="text-muted-foreground flex items-start gap-2 text-sm">
+                <MapPin className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+                {selected.address}
+              </p>
+              <p className="text-sm text-pretty">{selected.description}</p>
+              <p className="text-muted-foreground text-xs">
+                Добавил: {selected.addedBy}
+              </p>
+
+              <Button asChild className="w-full">
+                <a
+                  href={`https://www.openstreetmap.org/directions?to=${selected.lat},${selected.lng}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <Route /> Построить маршрут
+                </a>
+              </Button>
+
+              <div className="grid grid-cols-4 gap-2" aria-label="Действия с местом">
+                <Button
+                  type="button"
+                  variant={selected.myReaction === 1 ? "default" : "outline"}
+                  onClick={() => react(1)}
+                  disabled={reacting}
+                  aria-pressed={selected.myReaction === 1}
+                  aria-label={`Нравится, ${selected.likes}`}
+                >
+                  <ThumbsUp />
+                  <span className="tabular-nums">{selected.likes}</span>
+                </Button>
+                <Button
+                  type="button"
+                  variant={selected.myReaction === -1 ? "destructive" : "outline"}
+                  onClick={() => react(-1)}
+                  disabled={reacting}
+                  aria-pressed={selected.myReaction === -1}
+                  aria-label={`Не нравится, ${selected.dislikes}`}
+                >
+                  <ThumbsDown />
+                  <span className="tabular-nums">{selected.dislikes}</span>
+                </Button>
+                <Button asChild variant="outline">
+                  <a
+                    href="#place-comments"
+                    aria-label={`Комментарии, ${selected.comments.length}`}
+                  >
+                    <MessageSquare />
+                    <span className="tabular-nums">{selected.comments.length}</span>
+                  </a>
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  aria-label="Добавить фото"
+                  onClick={() => requireMember("photo", selected.id) && setPhotoOpen(true)}
+                >
+                  <Camera />
+                </Button>
+              </div>
+
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground w-full"
+                onClick={() => {
+                  if (!requireMember("report", selected.id)) return;
+                  setReportReason("inaccurate");
+                  setReportOpen(true);
+                }}
+              >
+                <Flag /> Пожаловаться на место
+              </Button>
+
+              <Separator />
+
+              <section className="space-y-4" id="place-comments">
+                <div className="space-y-1">
+                  <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+                    Обсуждение
+                  </p>
+                  <h3 className="font-semibold tracking-tight">
+                    Комментарии{" "}
+                    <span className="text-muted-foreground tabular-nums">
+                      {selected.comments.length}
+                    </span>
+                  </h3>
+                </div>
+
+                {commentThreads.map(({ root, replies }) => (
+                  <div className="space-y-3" key={root.id}>
+                    {renderComment(root)}
+                    {replies.length > 0 && (
+                      <div className="space-y-3 border-l pl-4 md:ml-4">
+                        {replies.map((reply) => renderComment(reply, true))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+
+                {!selected.comments.length && (
+                  <div className="text-muted-foreground flex flex-col items-center gap-2 rounded-lg border border-dashed p-6 text-center">
+                    <MessageSquare className="size-5" aria-hidden="true" />
+                    <p className="text-sm text-pretty">
+                      Пока нет комментариев. Расскажите, что важно знать об этом
+                      месте.
+                    </p>
+                  </div>
+                )}
+
+                {user && session ? (
+                  <form className="space-y-2" onSubmit={addComment}>
+                    <input
+                      className="hidden"
+                      name="website"
+                      type="text"
+                      tabIndex={-1}
+                      autoComplete="off"
+                      aria-hidden="true"
+                    />
+                    {replyTo && (
+                      <div className="bg-muted flex items-center justify-between gap-2 rounded-md px-3 py-2 text-sm">
+                        <span className="truncate">
+                          Ответ для <strong>{replyTo.author}</strong>
+                        </span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="size-7"
+                          aria-label="Отменить ответ"
+                          onClick={() => setReplyTo(null)}
+                        >
+                          <X />
+                        </Button>
+                      </div>
+                    )}
+                    <Label className="sr-only" htmlFor="comment">
+                      Ваш комментарий
+                    </Label>
+                    <div className="flex items-end gap-2">
+                      <Textarea
+                        id="comment"
+                        name="comment"
+                        maxLength={1000}
+                        required
+                        rows={2}
+                        placeholder={
+                          replyTo ? `Ответить ${replyTo.author}…` : "Добавить комментарий…"
+                        }
+                      />
+                      <Button
+                        type="submit"
+                        size="icon"
+                        disabled={savingComment}
+                        aria-label={
+                          savingComment
+                            ? "Публикуем комментарий"
+                            : "Опубликовать комментарий"
+                        }
+                      >
+                        <Send />
+                      </Button>
+                    </div>
+                  </form>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-auto w-full justify-between py-3 text-left"
+                    onClick={() => sendGuestToAuth("comment", selected.id)}
+                  >
+                    <span className="flex items-center gap-3">
+                      <User className="shrink-0" aria-hidden="true" />
+                      <span className="flex flex-col">
+                        <strong className="text-sm font-medium">
+                          Войдите, чтобы комментировать
+                        </strong>
+                        <small className="text-muted-foreground text-xs">
+                          Ответы и обсуждения доступны участникам Atlas
+                        </small>
+                      </span>
+                    </span>
+                    <ChevronRight className="shrink-0" aria-hidden="true" />
+                  </Button>
+                )}
+              </section>
+            </div>
+          </ScrollArea>
+        </Card>
       )}
 
-      <Modal open={photoOpen} onClose={() => setPhotoOpen(false)} labelledBy="photo-title">
-        {selected && (
-          <section className="modal social-modal">
-            <button className="close" type="button" aria-label="Закрыть окно" onClick={() => setPhotoOpen(false)}><Icon name="close" /></button>
-            <div className="modal-icon" aria-hidden="true"><Icon name="camera" /></div>
-            <p className="eyebrow">Фото сообщества</p>
-            <h2 id="photo-title">Добавить фото</h2>
-            <p className="modal-description">Покажите, как выглядит «{selected.name}». Фото появится после проверки модератором.</p>
-            <form onSubmit={addPhoto}>
-              <label className="file-drop" htmlFor="place-photo">
-                <Icon name="camera" />
-                <span><strong>Выберите фото</strong><small>JPG, PNG или WebP до 5 МБ</small></span>
-              </label>
-              <input className="file-input" id="place-photo" name="photo" type="file" accept="image/jpeg,image/png,image/webp" required data-initial-focus />
-              <label htmlFor="photo-caption">Подпись <span className="optional">необязательно</span></label>
-              <input id="photo-caption" name="caption" maxLength={240} placeholder="Что изображено на фото" />
-              <div className="modal-actions"><button type="button" onClick={() => setPhotoOpen(false)}>Отменить</button><button className="primary" type="submit" disabled={savingPhoto}>{savingPhoto ? "Загружаем…" : "Отправить на проверку"}</button></div>
-            </form>
-          </section>
-        )}
-      </Modal>
+      <Dialog open={photoOpen} onOpenChange={setPhotoOpen}>
+        <DialogContent>
+          {selected && (
+            <>
+              <DialogHeader>
+                <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+                  Фото сообщества
+                </p>
+                <DialogTitle>Добавить фото</DialogTitle>
+                <DialogDescription>
+                  Покажите, как выглядит «{selected.name}». Фото появится после
+                  проверки модератором.
+                </DialogDescription>
+              </DialogHeader>
+              <form className="space-y-4" onSubmit={addPhoto}>
+                <div className="space-y-2">
+                  <Label htmlFor="place-photo">
+                    Фото{" "}
+                    <span className="text-muted-foreground font-normal">
+                      JPG, PNG или WebP до 5 МБ
+                    </span>
+                  </Label>
+                  <Input
+                    id="place-photo"
+                    name="photo"
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    required
+                    className="h-auto py-2"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="photo-caption">
+                    Подпись{" "}
+                    <span className="text-muted-foreground font-normal">
+                      необязательно
+                    </span>
+                  </Label>
+                  <Input
+                    id="photo-caption"
+                    name="caption"
+                    maxLength={240}
+                    placeholder="Что изображено на фото"
+                  />
+                </div>
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setPhotoOpen(false)}
+                  >
+                    Отменить
+                  </Button>
+                  <Button type="submit" disabled={savingPhoto}>
+                    {savingPhoto ? "Загружаем…" : "Отправить на проверку"}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
 
-      <Modal open={reportOpen} onClose={() => setReportOpen(false)} labelledBy="report-title">
-        {selected && (
-          <section className="modal social-modal">
-            <button className="close" type="button" aria-label="Закрыть окно" onClick={() => setReportOpen(false)}><Icon name="close" /></button>
-            <div className="modal-icon report-icon" aria-hidden="true"><Icon name="flag" /></div>
-            <p className="eyebrow">Безопасность сообщества</p>
-            <h2 id="report-title">Пожаловаться на место</h2>
-            <p className="modal-description">Сообщите, что не так с «{selected.name}». Модератор проверит жалобу.</p>
-            <form onSubmit={submitReport}>
-              <label htmlFor="report-reason">Причина</label>
-              <select id="report-reason" name="reason" defaultValue="inaccurate" data-initial-focus>
-                {(Object.entries(reportReasons) as [ReportReason, string][]).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
-              </select>
-              <label htmlFor="report-details">Комментарий <span className="optional">необязательно</span></label>
-              <textarea id="report-details" name="details" maxLength={1000} placeholder="Добавьте детали, которые помогут разобраться" />
-              <div className="modal-actions"><button type="button" onClick={() => setReportOpen(false)}>Отменить</button><button className="primary" type="submit" disabled={savingReport}>{savingReport ? "Отправляем…" : "Отправить жалобу"}</button></div>
-            </form>
-          </section>
-        )}
-      </Modal>
+      <Dialog open={reportOpen} onOpenChange={setReportOpen}>
+        <DialogContent>
+          {selected && (
+            <>
+              <DialogHeader>
+                <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+                  Безопасность сообщества
+                </p>
+                <DialogTitle>Пожаловаться на место</DialogTitle>
+                <DialogDescription>
+                  Сообщите, что не так с «{selected.name}». Модератор проверит
+                  жалобу.
+                </DialogDescription>
+              </DialogHeader>
+              <form className="space-y-4" onSubmit={submitReport}>
+                <div className="space-y-2">
+                  <Label htmlFor="report-reason">Причина</Label>
+                  <Select
+                    value={reportReason}
+                    onValueChange={(value) => setReportReason(value as ReportReason)}
+                  >
+                    <SelectTrigger id="report-reason" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(Object.entries(reportReasons) as [ReportReason, string][]).map(
+                        ([value, label]) => (
+                          <SelectItem key={value} value={value}>
+                            {label}
+                          </SelectItem>
+                        ),
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="report-details">
+                    Комментарий{" "}
+                    <span className="text-muted-foreground font-normal">
+                      необязательно
+                    </span>
+                  </Label>
+                  <Textarea
+                    id="report-details"
+                    name="details"
+                    maxLength={1000}
+                    placeholder="Добавьте детали, которые помогут разобраться"
+                  />
+                </div>
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setReportOpen(false)}
+                  >
+                    Отменить
+                  </Button>
+                  <Button type="submit" disabled={savingReport}>
+                    {savingReport ? "Отправляем…" : "Отправить жалобу"}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
 
-      <Modal open={Boolean(draft)} onClose={() => setDraft(null)} labelledBy="add-title" returnFocus={addButtonRef}>
-        {draft && (
-          <section className="modal">
-            <button className="close" type="button" aria-label="Закрыть окно" onClick={() => setDraft(null)}>
-              <Icon name="close" />
-            </button>
-            <div className="modal-icon" aria-hidden="true"><Icon name="location" /></div>
-            <p className="eyebrow">Новая точка</p>
-            <h2 id="add-title">Добавить место</h2>
-            <p className="modal-description">Расскажите, чем оно полезно. После проверки место появится на общей карте.</p>
-            <p className="coordinates"><Icon name="location" /> {draft.lat.toFixed(5)}, {draft.lng.toFixed(5)}</p>
-            <form onSubmit={addPlace}>
-              <input className="honeypot" name="website" type="text" tabIndex={-1} autoComplete="off" aria-hidden="true" />
-              <label htmlFor="place-name">Название</label>
-              <input id="place-name" name="name" maxLength={120} required autoFocus data-initial-focus placeholder="Например: Phuket Immigration Office" />
-              <label htmlFor="place-category">Категория</label>
-              <select id="place-category" name="category" defaultValue={filter === "all" ? "documents" : filter}>
-                {(Object.keys(categories) as Category[]).map((key) => <option key={key} value={key}>{categories[key].label}</option>)}
-              </select>
-              <label htmlFor="place-address">Адрес</label>
-              <input id="place-address" name="address" maxLength={200} required placeholder="Улица, район или ориентир" />
-              <label htmlFor="place-description">Чем полезно это место</label>
-              <textarea id="place-description" name="description" maxLength={1000} required placeholder="Что здесь можно сделать и что стоит знать заранее" />
-              <div className="modal-actions">
-                <button type="button" onClick={() => setDraft(null)}>Отменить</button>
-                <button className="primary" type="submit" disabled={savingPlace}>{savingPlace ? "Добавляем…" : "Добавить на карту"}</button>
-              </div>
-            </form>
-          </section>
-        )}
-      </Modal>
+      <Dialog
+        open={Boolean(draft)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDraft(null);
+            addButtonRef.current?.focus();
+          }
+        }}
+      >
+        <DialogContent>
+          {draft && (
+            <>
+              <DialogHeader>
+                <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+                  Новая точка
+                </p>
+                <DialogTitle>Добавить место</DialogTitle>
+                <DialogDescription>
+                  Расскажите, чем оно полезно. После проверки место появится на
+                  общей карте.
+                </DialogDescription>
+              </DialogHeader>
+              <Badge variant="secondary" className="w-fit tabular-nums">
+                <MapPin /> {draft.lat.toFixed(5)}, {draft.lng.toFixed(5)}
+              </Badge>
+              <form className="space-y-4" onSubmit={addPlace}>
+                <input
+                  className="hidden"
+                  name="website"
+                  type="text"
+                  tabIndex={-1}
+                  autoComplete="off"
+                  aria-hidden="true"
+                />
+                <div className="space-y-2">
+                  <Label htmlFor="place-name">Название</Label>
+                  <Input
+                    id="place-name"
+                    name="name"
+                    maxLength={120}
+                    required
+                    autoFocus
+                    placeholder="Например: Phuket Immigration Office"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="place-category">Категория</Label>
+                  <Select
+                    value={draftCategory}
+                    onValueChange={(value) => setDraftCategory(value as Category)}
+                  >
+                    <SelectTrigger id="place-category" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(Object.keys(categories) as Category[]).map((key) => (
+                        <SelectItem key={key} value={key}>
+                          {categories[key].label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="place-address">Адрес</Label>
+                  <Input
+                    id="place-address"
+                    name="address"
+                    maxLength={200}
+                    required
+                    placeholder="Улица, район или ориентир"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="place-description">Чем полезно это место</Label>
+                  <Textarea
+                    id="place-description"
+                    name="description"
+                    maxLength={1000}
+                    required
+                    placeholder="Что здесь можно сделать и что стоит знать заранее"
+                  />
+                </div>
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setDraft(null)}
+                  >
+                    Отменить
+                  </Button>
+                  <Button type="submit" disabled={savingPlace}>
+                    {savingPlace ? "Добавляем…" : "Добавить на карту"}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
