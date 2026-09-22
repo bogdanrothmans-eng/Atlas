@@ -6,26 +6,19 @@ import { useRouter } from "next/router";
 import type { Map as MapLibreMap, Marker, StyleSpecification } from "maplibre-gl";
 import { toast } from "sonner";
 import {
-  Briefcase,
   Camera,
   ChevronRight,
-  FileText,
   Flag,
-  HeartPulse,
   MapPin,
   MessageSquare,
   Plus,
   Route,
   Search,
   Send,
-  Sparkles,
   ThumbsDown,
   ThumbsUp,
   User,
-  Users,
-  UtensilsCrossed,
   X,
-  type LucideIcon,
 } from "lucide-react";
 
 import {
@@ -43,6 +36,8 @@ import {
 } from "@/lib/atlasRepository";
 import { useAuth, userDisplayName } from "@/components/AuthProvider";
 import { BrandMark } from "@/components/Brand";
+import { CitySwitcher } from "@/components/CitySwitcher";
+import { FiltersSheet } from "@/components/FiltersSheet";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -67,21 +62,17 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { categories } from "@/lib/categories";
+import {
+  cities,
+  cityById,
+  defaultCity,
+  isInCity,
+  type City,
+} from "@/lib/cities";
 import { cn } from "@/lib/utils";
 
 type MarkerEntry = { marker: Marker; element: HTMLButtonElement; place: Place };
-
-const categories: Record<
-  Category,
-  { label: string; icon: LucideIcon; color: string }
-> = {
-  documents: { label: "Документы", icon: FileText, color: "#6f4bd8" },
-  health: { label: "Медицина", icon: HeartPulse, color: "#c83f52" },
-  food: { label: "Еда", icon: UtensilsCrossed, color: "#a94f18" },
-  work: { label: "Работа", icon: Briefcase, color: "#24739e" },
-  family: { label: "Для семьи", icon: Users, color: "#bd3f7f" },
-  leisure: { label: "Досуг", icon: Sparkles, color: "#2f8258" },
-};
 
 const seedPlaces: Place[] = [
   { id: "1", name: "Phuket Immigration Office", category: "documents", address: "Phuket Road, Phuket Town", description: "Иммиграционный офис: визы, продления и регистрация иностранцев.", lng: 98.3913, lat: 7.8663, likes: 18, dislikes: 1, myReaction: null, addedBy: "Анна К.", photos: [], comments: [{ id: "c1", author: "Михаил", text: "Лучше приезжать утром и заранее подготовить копии документов.", date: "12 авг.", parentId: null, createdAt: new Date().toISOString() }] },
@@ -109,6 +100,7 @@ const osmStyle: StyleSpecification = {
 const STORAGE_KEY = "atlas-demo-phuket-v1";
 const CLIENT_ID_KEY = "atlas-client-id-v1";
 const ACTION_TIMES_STORAGE_KEY = "atlas-action-times-v1";
+const CITY_STORAGE_KEY = "atlas-city-v1";
 const MIN_MARKER_DISTANCE = 58;
 const PLACE_SUBMISSION_INTERVAL = 10 * 60 * 1000;
 const COMMENT_SUBMISSION_INTERVAL = 30 * 1000;
@@ -219,6 +211,8 @@ export default function AtlasMap() {
   const [places, setPlaces] = useState<Place[]>(seedPlaces);
   const [selected, setSelected] = useState<Place | null>(null);
   const [filter, setFilter] = useState<Category | "all">("all");
+  const [city, setCity] = useState<City>(defaultCity);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState<{ lng: number; lat: number } | null>(null);
@@ -271,6 +265,11 @@ export default function AtlasMap() {
   }, [places]);
 
   useEffect(() => {
+    const stored = localStorage.getItem(CITY_STORAGE_KEY);
+    if (stored) setCity(cityById(stored));
+  }, []);
+
+  useEffect(() => {
     setReplyTo(null);
   }, [selected?.id]);
 
@@ -294,20 +293,33 @@ export default function AtlasMap() {
     return () => document.removeEventListener("keydown", cancel);
   }, [adding]);
 
+  const cityPlaces = useMemo(
+    () => places.filter((place) => isInCity(place, city)),
+    [places, city],
+  );
+
   const visible = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
-    return places.filter((place) => {
+    return cityPlaces.filter((place) => {
       const matchesCategory = filter === "all" || place.category === filter;
       const matchesQuery = `${place.name} ${place.address} ${place.description}`.toLowerCase().includes(normalizedQuery);
       return matchesCategory && matchesQuery;
     });
-  }, [places, filter, query]);
+  }, [cityPlaces, filter, query]);
 
   const categoryCounts = useMemo(() => {
-    return places.reduce<Record<Category, number>>((counts, place) => {
+    return cityPlaces.reduce<Record<Category, number>>((counts, place) => {
       counts[place.category] += 1;
       return counts;
     }, { documents: 0, health: 0, food: 0, work: 0, family: 0, leisure: 0 });
+  }, [cityPlaces]);
+
+  const cityCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const item of cities) {
+      counts[item.id] = places.filter((place) => isInCity(place, item)).length;
+    }
+    return counts;
   }, [places]);
 
   useEffect(() => {
@@ -398,8 +410,8 @@ export default function AtlasMap() {
     const compact = window.innerWidth <= 700;
     map.fitBounds(bounds, {
       padding: compact
-        ? { top: 312, right: 24, bottom: 40, left: 24 }
-        : { top: 230, right: 40, bottom: 40, left: 380 },
+        ? { top: 200, right: 24, bottom: 40, left: 24 }
+        : { top: 140, right: 40, bottom: 40, left: 380 },
       maxZoom: 12.5,
       duration: animated ? 420 : 0,
       essential: false,
@@ -407,14 +419,14 @@ export default function AtlasMap() {
   };
 
   useEffect(() => {
-    if (loadingPlaces || hasFitInitialPlacesRef.current || !places.length) return;
+    if (loadingPlaces || hasFitInitialPlacesRef.current || !cityPlaces.length) return;
     hasFitInitialPlacesRef.current = true;
     const frame = requestAnimationFrame(() => {
       mapRef.current?.resize();
-      fitPlacesInView(places);
+      fitPlacesInView(cityPlaces);
     });
     return () => cancelAnimationFrame(frame);
-  }, [loadingPlaces, places]);
+  }, [loadingPlaces, cityPlaces]);
 
   const beginAdding = () => {
     if (!requireMember("add-place")) return;
@@ -435,11 +447,31 @@ export default function AtlasMap() {
     setAdding(false);
   };
 
+  const changeCity = (next: City) => {
+    setCity(next);
+    localStorage.setItem(CITY_STORAGE_KEY, next.id);
+    setSelected(null);
+    setQuery("");
+    setFilter("all");
+    setAdding(false);
+    const targets = places.filter((place) => isInCity(place, next));
+    if (targets.length) {
+      fitPlacesInView(targets, true);
+    } else {
+      mapRef.current?.flyTo({
+        center: [next.lng, next.lat],
+        zoom: next.zoom,
+        duration: 600,
+        essential: false,
+      });
+    }
+  };
+
   const resetDiscovery = () => {
     setQuery("");
     setFilter("all");
     setSelected(null);
-    fitPlacesInView(places, true);
+    fitPlacesInView(cityPlaces, true);
   };
 
   const addPlace = async (event: FormEvent<HTMLFormElement>) => {
@@ -723,27 +755,28 @@ export default function AtlasMap() {
         tabIndex={-1}
       />
 
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-20 space-y-2 p-3">
-        <header className="bg-background pointer-events-auto mx-auto flex max-w-5xl flex-wrap items-center gap-2 rounded-2xl border p-2 shadow-sm">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-20 p-3">
+        <header className="bg-background pointer-events-auto mx-auto flex max-w-5xl flex-wrap items-center gap-1.5 rounded-2xl border p-2 shadow-sm sm:flex-nowrap sm:gap-2">
           <button
             type="button"
             onClick={resetDiscovery}
             aria-label="Atlas — показать все места"
-            className="focus-visible:ring-ring/50 flex items-center gap-2 rounded-md px-1 font-semibold tracking-tight outline-none focus-visible:ring-[3px]"
+            className="focus-visible:ring-ring/50 flex shrink-0 items-center gap-2 rounded-md px-1 font-semibold tracking-tight outline-none focus-visible:ring-[3px]"
           >
             <BrandMark />
-            <span className="hidden sm:inline">Atlas</span>
+            <span className="hidden lg:inline">Atlas</span>
           </button>
 
-          <div
-            className="hidden flex-col leading-tight md:flex"
-            aria-label="Текущий город: Пхукет, Таиланд"
-          >
-            <span className="text-sm font-medium">Пхукет</span>
-            <small className="text-muted-foreground text-xs">Таиланд</small>
+          <Separator
+            orientation="vertical"
+            className="hidden data-[orientation=vertical]:h-8 sm:block"
+          />
+
+          <div className="flex-1 sm:flex-none">
+            <CitySwitcher city={city} counts={cityCounts} onSelect={changeCity} />
           </div>
 
-          <div className="relative min-w-40 flex-1">
+          <div className="relative order-last w-full min-w-0 sm:order-none sm:w-auto sm:flex-1">
             <Search
               className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2"
               aria-hidden="true"
@@ -755,7 +788,7 @@ export default function AtlasMap() {
               id="place-search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Название, адрес или описание"
+              placeholder={`Поиск в городе ${city.name}`}
               autoComplete="off"
               aria-controls="map"
               className="px-9"
@@ -774,10 +807,23 @@ export default function AtlasMap() {
             )}
           </div>
 
+          <FiltersSheet
+            open={filtersOpen}
+            onOpenChange={setFiltersOpen}
+            filter={filter}
+            counts={categoryCounts}
+            total={cityPlaces.length}
+            visibleCount={visible.length}
+            onChange={setFilter}
+            onReset={() => setFilter("all")}
+          />
+
           <Button
             ref={addButtonRef}
             type="button"
+            size="icon"
             variant={adding ? "secondary" : "default"}
+            className="sm:w-auto sm:px-4"
             aria-label={adding ? "Отменить добавление места" : "Добавить место"}
             aria-pressed={adding}
             onClick={adding ? cancelAdding : beginAdding}
@@ -787,11 +833,11 @@ export default function AtlasMap() {
               <X className={cn("absolute", iconSwap(adding))} />
             </span>
             <span className="hidden sm:inline">
-              {adding ? "Отменить" : "Добавить место"}
+              {adding ? "Отменить" : "Добавить"}
             </span>
           </Button>
 
-          <Button asChild variant="ghost" size="icon" className="rounded-full">
+          <Button asChild variant="ghost" size="icon" className="shrink-0 rounded-full">
             <Link
               href={user ? "/profile" : `/auth?next=${encodeURIComponent("/profile")}`}
               aria-label={user ? `Открыть профиль: ${userDisplayName(user)}` : "Войти в Atlas"}
@@ -806,53 +852,11 @@ export default function AtlasMap() {
             </Link>
           </Button>
         </header>
-
-        <nav
-          className="pointer-events-auto mx-auto flex max-w-5xl gap-2 overflow-x-auto pb-1"
-          aria-label="Категории"
-        >
-          <Button
-            type="button"
-            size="sm"
-            variant={filter === "all" ? "default" : "outline"}
-            className="shrink-0 rounded-full shadow-sm"
-            aria-pressed={filter === "all"}
-            onClick={() => setFilter("all")}
-          >
-            Все места
-            <Badge variant="secondary" className="tabular-nums">
-              {places.length}
-            </Badge>
-          </Button>
-          {(Object.keys(categories) as Category[]).map((key) => {
-            const { label, icon: CategoryIcon, color } = categories[key];
-            return (
-              <Button
-                key={key}
-                type="button"
-                size="sm"
-                variant={filter === key ? "default" : "outline"}
-                className="shrink-0 rounded-full shadow-sm"
-                aria-pressed={filter === key}
-                onClick={() => setFilter(key)}
-              >
-                <CategoryIcon
-                  style={{ color: filter === key ? undefined : color }}
-                  aria-hidden="true"
-                />
-                {label}
-                <Badge variant="secondary" className="tabular-nums">
-                  {categoryCounts[key]}
-                </Badge>
-              </Button>
-            );
-          })}
-        </nav>
       </div>
 
       {!selected && !adding && visible.length > 0 && (
         <Card
-          className="absolute top-36 left-3 z-10 hidden w-72 gap-0 py-4 shadow-lg md:block"
+          className="absolute top-24 left-3 z-10 hidden w-72 gap-0 py-4 shadow-lg md:block"
           aria-labelledby="map-intro-title"
         >
           <CardContent className="space-y-2 px-4">
@@ -869,7 +873,7 @@ export default function AtlasMap() {
               <Badge variant="secondary">
                 {loadingPlaces ? "Обновляем…" : `${visible.length} мест`}
               </Badge>
-              <Badge variant="secondary">Пхукет</Badge>
+              <Badge variant="secondary">{city.name}</Badge>
             </div>
           </CardContent>
         </Card>
@@ -877,7 +881,7 @@ export default function AtlasMap() {
 
       {adding && (
         <Card
-          className="absolute top-36 left-1/2 z-10 w-[min(28rem,calc(100%-1.5rem))] -translate-x-1/2 gap-0 py-4 shadow-lg"
+          className="absolute top-24 left-1/2 z-10 w-[min(28rem,calc(100%-1.5rem))] -translate-x-1/2 gap-0 py-4 shadow-lg"
           aria-labelledby="add-instruction-title"
         >
           <CardContent className="flex flex-wrap items-center gap-3 px-4">
@@ -904,20 +908,38 @@ export default function AtlasMap() {
 
       {!loadingPlaces && visible.length === 0 && (
         <Card
-          className="absolute top-36 left-1/2 z-10 w-[min(24rem,calc(100%-1.5rem))] -translate-x-1/2 gap-0 py-6 text-center shadow-lg"
+          className="absolute top-24 left-1/2 z-10 w-[min(24rem,calc(100%-1.5rem))] -translate-x-1/2 gap-0 py-6 text-center shadow-lg"
           aria-labelledby="map-empty-title"
         >
           <CardContent className="space-y-2 px-6">
-            <Search className="text-muted-foreground mx-auto size-5" aria-hidden="true" />
-            <h2 id="map-empty-title" className="text-lg font-semibold tracking-tight">
-              Места не найдены
-            </h2>
-            <p className="text-muted-foreground text-sm text-pretty">
-              Попробуйте другой запрос или сбросьте выбранную категорию.
-            </p>
-            <Button variant="secondary" size="sm" onClick={resetDiscovery}>
-              Показать все места
-            </Button>
+            {cityPlaces.length ? (
+              <>
+                <Search className="text-muted-foreground mx-auto size-5" aria-hidden="true" />
+                <h2 id="map-empty-title" className="text-lg font-semibold tracking-tight">
+                  Места не найдены
+                </h2>
+                <p className="text-muted-foreground text-sm text-pretty">
+                  Попробуйте другой запрос или сбросьте выбранную категорию.
+                </p>
+                <Button variant="secondary" size="sm" onClick={resetDiscovery}>
+                  Показать все места
+                </Button>
+              </>
+            ) : (
+              <>
+                <MapPin className="text-muted-foreground mx-auto size-5" aria-hidden="true" />
+                <h2 id="map-empty-title" className="text-lg font-semibold tracking-tight">
+                  {`В городе ${city.name} пока нет мест`}
+                </h2>
+                <p className="text-muted-foreground text-sm text-pretty">
+                  Карту наполняет сообщество. Добавьте первое место — оно появится
+                  здесь после проверки.
+                </p>
+                <Button variant="secondary" size="sm" onClick={beginAdding}>
+                  <Plus /> Добавить первое место
+                </Button>
+              </>
+            )}
           </CardContent>
         </Card>
       )}
@@ -932,7 +954,7 @@ export default function AtlasMap() {
 
       {selected && activeCategory && ActiveCategoryIcon && (
         <Card
-          className="absolute inset-x-0 bottom-0 z-30 max-h-[75svh] gap-0 rounded-b-none py-0 shadow-xl md:inset-x-auto md:top-36 md:bottom-3 md:left-3 md:max-h-none md:w-96 md:rounded-xl"
+          className="absolute inset-x-0 bottom-0 z-30 max-h-[75svh] gap-0 rounded-b-none py-0 shadow-xl md:inset-x-auto md:top-24 md:bottom-3 md:left-3 md:max-h-none md:w-96 md:rounded-xl"
           aria-label={`Информация о ${selected.name}`}
         >
           <div className="relative flex items-start gap-3 border-b p-4 pr-12">
