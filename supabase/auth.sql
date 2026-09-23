@@ -85,7 +85,7 @@ begin
   select last_submitted_at into last_submission from public.submission_limits
   where submission_limits.visitor_id = current_user_id and action = 'place';
   if last_submission is not null and last_submission > now() - interval '10 minutes' then
-    raise exception 'Новое место можно отправить не чаще одного раза в 10 минут';
+    raise exception 'Новое место можно добавить не чаще одного раза в 10 минут';
   end if;
 
   insert into public.places (id, name, category, address, description, longitude, latitude, added_by, status)
@@ -204,7 +204,7 @@ begin
   select last_submitted_at into last_submission from public.submission_limits
   where submission_limits.visitor_id = current_user_id and action = 'photo';
   if last_submission is not null and last_submission > now() - interval '60 seconds' then
-    raise exception 'Следующее фото можно отправить через минуту';
+    raise exception 'Следующее фото можно добавить через минуту';
   end if;
 
   insert into public.place_photos (id, place_id, storage_path, caption, alt_text, visitor_id, status)

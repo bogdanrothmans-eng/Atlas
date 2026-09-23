@@ -730,7 +730,7 @@ export default function AtlasMap() {
     if (String(data.get("website") || "").trim()) return;
     const placeWait = getActionWait("place", PLACE_SUBMISSION_INTERVAL, user.id);
     if (isSupabaseConfigured && placeWait > 0) {
-      toast(`Новое место можно отправить через ${Math.ceil(placeWait / 60000)} мин.`);
+      toast(`Новое место можно добавить через ${Math.ceil(placeWait / 60000)} мин.`);
       return;
     }
     const place: Place = {
@@ -847,7 +847,7 @@ export default function AtlasMap() {
     }
     const photoWait = getActionWait("photo", PHOTO_SUBMISSION_INTERVAL, user.id);
     if (photoWait > 0) {
-      toast(`Следующее фото можно отправить через ${Math.ceil(photoWait / 1000)} сек.`);
+      toast(`Следующее фото можно добавить через ${Math.ceil(photoWait / 1000)} сек.`);
       return;
     }
     setSavingPhoto(true);
