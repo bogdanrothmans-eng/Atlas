@@ -39,6 +39,7 @@ import { useAuth, userDisplayName } from "@/components/AuthProvider";
 import { BrandMark } from "@/components/Brand";
 import { CitySwitcher } from "@/components/CitySwitcher";
 import { FiltersSheet } from "@/components/FiltersSheet";
+import { PhotoPicker, photoError } from "@/components/PhotoPicker";
 import { PlacePin, type LabelSide } from "@/components/PlacePin";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -728,6 +729,13 @@ export default function AtlasMap() {
     if (!draft || savingPlace) return;
     const data = new FormData(event.currentTarget);
     if (String(data.get("website") || "").trim()) return;
+    const photoFile = data.get("photo");
+    const photo = photoFile instanceof File && photoFile.size ? photoFile : null;
+    const photoProblem = photo && photoError(photo);
+    if (photoProblem) {
+      toast.error(photoProblem);
+      return;
+    }
     const placeWait = getActionWait("place", PLACE_SUBMISSION_INTERVAL, user.id);
     if (isSupabaseConfigured && placeWait > 0) {
       toast(`Новое место можно добавить через ${Math.ceil(placeWait / 60000)} мин.`);
@@ -753,10 +761,29 @@ export default function AtlasMap() {
         await createPlace(place, user.id, session.access_token);
         rememberAction("place", user.id);
       }
+      // The place is already on the map, so a failed photo must not undo it:
+      // say so and let the person retry from the place card.
+      let photoFailed = false;
+      if (photo) {
+        const alt = `Фото места ${place.name}`;
+        try {
+          const uploaded = isSupabaseConfigured
+            ? await uploadPlacePhoto(place.id, photo, "", user.id, session.access_token)
+            : { id: crypto.randomUUID(), url: URL.createObjectURL(photo), caption: "", alt, createdAt: new Date().toISOString() };
+          if (isSupabaseConfigured) rememberAction("photo", user.id);
+          place.photos = [{ ...uploaded, alt: uploaded.alt || alt }];
+        } catch {
+          photoFailed = true;
+        }
+      }
       setPlaces((current) => [...current, place]);
       setSelected(place);
       setDraft(null);
-      toast.success(isSupabaseConfigured ? "Место добавлено на карту" : "Место сохранено в этом браузере");
+      if (photoFailed) {
+        toast.warning("Место добавлено, но фото не загрузилось. Попробуйте добавить его из карточки места.");
+      } else {
+        toast.success(isSupabaseConfigured ? "Место добавлено на карту" : "Место сохранено в этом браузере");
+      }
     } catch {
       toast.error("Не удалось добавить место. Проверьте соединение и повторите попытку.");
     } finally {
@@ -837,12 +864,9 @@ export default function AtlasMap() {
     const data = new FormData(form);
     const file = data.get("photo");
     if (!(file instanceof File) || !file.size) return;
-    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
-      toast.error("Подойдут JPG, PNG или WebP");
-      return;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error("Фото должно быть меньше 5 МБ");
+    const problem = photoError(file);
+    if (problem) {
+      toast.error(problem);
       return;
     }
     const photoWait = getActionWait("photo", PHOTO_SUBMISSION_INTERVAL, user.id);
@@ -1547,22 +1571,7 @@ export default function AtlasMap() {
                 </DialogDescription>
               </DialogHeader>
               <form className="space-y-4" onSubmit={addPhoto}>
-                <div className="space-y-2">
-                  <Label htmlFor="place-photo">
-                    Фото{" "}
-                    <span className="text-muted-foreground font-normal">
-                      JPG, PNG или WebP до 5 МБ
-                    </span>
-                  </Label>
-                  <Input
-                    id="place-photo"
-                    name="photo"
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp"
-                    required
-                    className="h-auto py-2"
-                  />
-                </div>
+                <PhotoPicker label="Фото" required alt={`Выбранное фото места ${selected.name}`} />
                 <div className="space-y-2">
                   <Label htmlFor="photo-caption">
                     Подпись{" "}
@@ -1680,8 +1689,8 @@ export default function AtlasMap() {
                 </p>
                 <DialogTitle>Добавить место</DialogTitle>
                 <DialogDescription>
-                  Расскажите, чем оно полезно. Место сразу появится на общей
-                  карте.
+                  Расскажите, чем оно полезно, и приложите фото, если есть. Место
+                  сразу появится на общей карте.
                 </DialogDescription>
               </DialogHeader>
               <Badge variant="secondary" className="w-fit tabular-nums">
@@ -1745,6 +1754,11 @@ export default function AtlasMap() {
                     placeholder="Что здесь можно сделать и что стоит знать заранее"
                   />
                 </div>
+                <PhotoPicker
+                  label="Фото"
+                  hint="необязательно"
+                  alt="Выбранное фото нового места"
+                />
                 <DialogFooter>
                   <Button
                     type="button"
