@@ -30,7 +30,7 @@ const providers: SocialProvider[] = [
 ];
 
 const highlights = [
-  { icon: MapPin, title: "Добавляйте полезные места", text: "Новые точки проходят модерацию." },
+  { icon: MapPin, title: "Добавляйте полезные места", text: "Новые точки сразу видны всем." },
   { icon: MessageSquare, title: "Делитесь опытом", text: "Пишите комментарии и отвечайте другим." },
   { icon: Flag, title: "Помогайте сообществу", text: "Оценивайте места и сообщайте о проблемах." },
 ];

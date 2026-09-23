@@ -730,7 +730,7 @@ export default function AtlasMap() {
     if (String(data.get("website") || "").trim()) return;
     const placeWait = getActionWait("place", PLACE_SUBMISSION_INTERVAL, user.id);
     if (isSupabaseConfigured && placeWait > 0) {
-      toast(`Новое место можно отправить через ${Math.ceil(placeWait / 60000)} мин.`);
+      toast(`Новое место можно добавить через ${Math.ceil(placeWait / 60000)} мин.`);
       return;
     }
     const place: Place = {
@@ -752,12 +752,11 @@ export default function AtlasMap() {
       if (isSupabaseConfigured) {
         await createPlace(place, user.id, session.access_token);
         rememberAction("place", user.id);
-      } else {
-        setPlaces((current) => [...current, place]);
-        setSelected(place);
       }
+      setPlaces((current) => [...current, place]);
+      setSelected(place);
       setDraft(null);
-      toast.success(isSupabaseConfigured ? "Место отправлено на модерацию" : "Место сохранено в этом браузере");
+      toast.success(isSupabaseConfigured ? "Место добавлено на карту" : "Место сохранено в этом браузере");
     } catch {
       toast.error("Не удалось добавить место. Проверьте соединение и повторите попытку.");
     } finally {
@@ -848,16 +847,19 @@ export default function AtlasMap() {
     }
     const photoWait = getActionWait("photo", PHOTO_SUBMISSION_INTERVAL, user.id);
     if (photoWait > 0) {
-      toast(`Следующее фото можно отправить через ${Math.ceil(photoWait / 1000)} сек.`);
+      toast(`Следующее фото можно добавить через ${Math.ceil(photoWait / 1000)} сек.`);
       return;
     }
     setSavingPhoto(true);
     try {
-      await uploadPlacePhoto(selected.id, file, String(data.get("caption") || "").trim(), user.id, session.access_token);
+      const photo = await uploadPlacePhoto(selected.id, file, String(data.get("caption") || "").trim(), user.id, session.access_token);
       rememberAction("photo", user.id);
+      const updated = { ...selected, photos: [...selected.photos, { ...photo, alt: photo.alt || `Фото места ${selected.name}` }] };
+      setPlaces((current) => current.map((place) => place.id === updated.id ? updated : place));
+      setSelected(updated);
       form.reset();
       setPhotoOpen(false);
-      toast.success("Фото отправлено на модерацию");
+      toast.success("Фото добавлено");
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : "Не удалось загрузить фото");
     } finally {
@@ -1205,8 +1207,8 @@ export default function AtlasMap() {
                   {`В городе ${city.name} пока нет мест`}
                 </h2>
                 <p className="text-muted-foreground text-sm text-pretty">
-                  Карту наполняет сообщество. Добавьте первое место — оно появится
-                  здесь после проверки.
+                  Карту наполняет сообщество. Добавьте первое место — оно сразу
+                  появится на карте.
                 </p>
                 <Button variant="secondary" size="sm" onClick={beginAdding}>
                   <Plus /> Добавить первое место
@@ -1540,8 +1542,8 @@ export default function AtlasMap() {
                 </p>
                 <DialogTitle>Добавить фото</DialogTitle>
                 <DialogDescription>
-                  Покажите, как выглядит «{selected.name}». Фото появится после
-                  проверки модератором.
+                  Покажите, как выглядит «{selected.name}». Фото сразу появится
+                  в карточке места.
                 </DialogDescription>
               </DialogHeader>
               <form className="space-y-4" onSubmit={addPhoto}>
@@ -1584,7 +1586,7 @@ export default function AtlasMap() {
                     Отменить
                   </Button>
                   <Button type="submit" disabled={savingPhoto}>
-                    {savingPhoto ? "Загружаем…" : "Отправить на проверку"}
+                    {savingPhoto ? "Загружаем…" : "Добавить фото"}
                   </Button>
                 </DialogFooter>
               </form>
@@ -1678,8 +1680,8 @@ export default function AtlasMap() {
                 </p>
                 <DialogTitle>Добавить место</DialogTitle>
                 <DialogDescription>
-                  Расскажите, чем оно полезно. После проверки место появится на
-                  общей карте.
+                  Расскажите, чем оно полезно. Место сразу появится на общей
+                  карте.
                 </DialogDescription>
               </DialogHeader>
               <Badge variant="secondary" className="w-fit tabular-nums">
