@@ -10,6 +10,7 @@ import {
   Camera,
   ChevronRight,
   Flag,
+  LoaderCircle,
   MapPin,
   MoreHorizontal,
   Plus,
@@ -72,6 +73,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { categories } from "@/lib/categories";
+import { formatCoordinates, reverseGeocode } from "@/lib/geocode";
 import {
   cities,
   cityById,
@@ -378,6 +380,9 @@ export default function AtlasMap() {
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState<{ lng: number; lat: number } | null>(null);
   const [draftCategory, setDraftCategory] = useState<Category>("documents");
+  const [draftAddress, setDraftAddress] = useState("");
+  const [addressLookup, setAddressLookup] = useState(false);
+  const addressEdited = useRef(false);
   const [reportReason, setReportReason] = useState<ReportReason>("inaccurate");
   const [loadingPlaces, setLoadingPlaces] = useState(isSupabaseConfigured);
   const [savingPlace, setSavingPlace] = useState(false);
@@ -439,6 +444,29 @@ export default function AtlasMap() {
   useEffect(() => {
     if (draft) setDraftCategory(filter === "all" ? "documents" : filter);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft]);
+
+  // Fill the address from the pin so nobody has to type it. What the person
+  // types wins over a late answer, and a point without an address falls back
+  // to its coordinates.
+  useEffect(() => {
+    setDraftAddress("");
+    addressEdited.current = false;
+    if (!draft) return;
+    const controller = new AbortController();
+    const fill = (address: string) => {
+      if (!addressEdited.current) setDraftAddress(address);
+    };
+    setAddressLookup(true);
+    reverseGeocode(draft.lat, draft.lng, controller.signal)
+      .then((address) => fill(address ?? formatCoordinates(draft.lat, draft.lng)))
+      .catch(() => {
+        if (!controller.signal.aborted) fill(formatCoordinates(draft.lat, draft.lng));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setAddressLookup(false);
+      });
+    return () => controller.abort();
   }, [draft]);
 
   useEffect(() => {
@@ -744,7 +772,7 @@ export default function AtlasMap() {
     const place: Place = {
       id: crypto.randomUUID(),
       name: String(data.get("name")).trim(),
-      address: String(data.get("address")).trim(),
+      address: String(data.get("address") || "").trim() || formatCoordinates(draft.lat, draft.lng),
       description: String(data.get("description")).trim(),
       category: draftCategory,
       ...draft,
@@ -1736,13 +1764,37 @@ export default function AtlasMap() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="place-address">Адрес</Label>
-                  <Input
-                    id="place-address"
-                    name="address"
-                    maxLength={200}
-                    required
-                    placeholder="Улица, район или ориентир"
-                  />
+                  <div className="relative">
+                    <Input
+                      id="place-address"
+                      name="address"
+                      maxLength={200}
+                      value={draftAddress}
+                      onChange={(event) => {
+                        addressEdited.current = true;
+                        setDraftAddress(event.target.value);
+                      }}
+                      placeholder={
+                        addressLookup ? "Определяем адрес…" : "Улица, район или ориентир"
+                      }
+                      aria-describedby="place-address-hint"
+                      aria-busy={addressLookup || undefined}
+                      className={cn(addressLookup && "pr-9")}
+                    />
+                    {addressLookup && (
+                      <LoaderCircle
+                        className="text-muted-foreground absolute top-1/2 right-3 size-4 -translate-y-1/2 animate-spin motion-reduce:animate-none"
+                        aria-hidden="true"
+                      />
+                    )}
+                  </div>
+                  <p id="place-address-hint" className="text-muted-foreground text-xs">
+                    {addressLookup
+                      ? "Ищем адрес по метке на карте."
+                      : draftAddress === formatCoordinates(draft.lat, draft.lng)
+                        ? "Адреса у этой точки нет, подставили координаты. Можно добавить ориентир."
+                        : "Подставили по метке на карте. Можно уточнить: этаж, вход, ориентир."}
+                  </p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="place-description">Чем полезно это место</Label>
